@@ -6,8 +6,6 @@
 const CONFIG = {
   GAS_URL: 'https://script.google.com/a/macros/dukasa.com.au/s/AKfycbwVtsJR6TXx3y3gAPw27MU_d_d54hHQVC9ZPdibYYF3blBwa404-Z5kLMA-uUNdXzGw/exec',
   API_KEY: '181049d1-b062-448a-a267-64824f1ef054',
-  // How often to refresh data in background (ms). 0 = no auto-refresh.
-  REFRESH_INTERVAL: 60000,
 };
 
 // ── STATE ───────────────────────────────────────────────────
@@ -184,7 +182,37 @@ function signOut() {
   location.reload();
 }
 
-// ── INIT APP ─────────────────────────────────────────────────
+// ── SMART SYNC — ping every 10s, full refresh only on change ─
+let _lastModifiedSeen = '0';
+
+async function startSmartSync() {
+  // Do an immediate full load then start polling
+  await refreshAllViews();
+  _lastModifiedSeen = await getLastModified();
+  setInterval(async () => {
+    try {
+      const ts = await getLastModified();
+      if (ts !== _lastModifiedSeen) {
+        _lastModifiedSeen = ts;
+        await refreshAllViews();
+        // Subtle pulse to indicate a live update came in
+        const topbar = document.querySelector('.topbar');
+        if (topbar) {
+          topbar.style.transition = 'background .3s';
+          topbar.style.background = 'rgba(83,74,183,0.12)';
+          setTimeout(() => { topbar.style.background = ''; }, 600);
+        }
+      }
+    } catch(e) { /* silent — network blip */ }
+  }, 10000); // poll every 10 seconds
+}
+
+async function getLastModified() {
+  try {
+    const res = await gasGet('ping');
+    return res.ok ? res.lastModified : _lastModifiedSeen;
+  } catch(e) { return _lastModifiedSeen; }
+}
 async function initApp() {
   document.body.innerHTML = `
     <div id="app" class="app-shell">
@@ -218,11 +246,7 @@ async function initApp() {
   `;
   state.currentWeekStart = weekStart(0);
   attachEvents();
-  await refreshAllViews();
-  // Auto-refresh in background
-  if (CONFIG.REFRESH_INTERVAL > 0) {
-    state.refreshTimer = setInterval(refreshAllViews, CONFIG.REFRESH_INTERVAL);
-  }
+  await startSmartSync();
 }
 
 function initials(emp) {

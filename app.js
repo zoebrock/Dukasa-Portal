@@ -163,6 +163,7 @@ function buildApp() {
   window.addEventListener('scroll', syncTopbar, {passive:true});
   renderAll();
   startSync();
+  startTicker();
 }
 
 function nav(name) {
@@ -237,10 +238,10 @@ function renderHome() {
     <div class="page-header">
       <div>
         <h1 class="page-title">Hello, ${esc(emp.first)}! 👋</h1>
-        <div class="page-subtitle">${now.toLocaleDateString('en-AU',{weekday:'long',day:'numeric',month:'long'})}</div>
+        <div class="page-subtitle" id="home-date">${now.toLocaleDateString('en-AU',{weekday:'long',day:'numeric',month:'long'})}</div>
       </div>
       <div class="hero-time">
-        <div class="hero-time-big">${now.toLocaleTimeString('en-AU',{hour:'2-digit',minute:'2-digit'})}</div>
+        <div class="hero-time-big" id="home-clock">${now.toLocaleTimeString('en-AU',{hour:'2-digit',minute:'2-digit'})}</div>
         <div class="hero-time-small">local time</div>
       </div>
     </div>
@@ -643,6 +644,31 @@ function renderProfile() {
     <div style="margin-top:24px;text-align:center">
       <button class="btn btn-secondary" onclick="signOut()">Sign out</button>
     </div>`;
+}
+
+// ── LOCAL TICKER — updates clock and date every second ─────────
+// Runs independently of GAS sync so UI is always live.
+let _tickerDate = today();
+function startTicker() {
+  // Update immediately, then every second
+  tickOnce();
+  setInterval(tickOnce, 1000);
+}
+function tickOnce() {
+  const now = new Date();
+  // Update clock display if it exists on screen
+  const clockEl = qs('#home-clock');
+  if (clockEl) clockEl.textContent = now.toLocaleTimeString('en-AU', {hour:'2-digit', minute:'2-digit'});
+  const dateEl = qs('#home-date');
+  if (dateEl) dateEl.textContent = now.toLocaleDateString('en-AU', {weekday:'long', day:'numeric', month:'long'});
+  // At midnight, today() changes — re-render the full home view so
+  // today's shift card, week strip active day etc. all update correctly
+  const newDate = today();
+  if (newDate !== _tickerDate) {
+    _tickerDate = newDate;
+    renderHome();
+    renderRoster(); // roster highlights change at midnight too
+  }
 }
 
 // ── SYNC ───────────────────────────────────────────────────────

@@ -16,7 +16,13 @@ const state = {
 const qs  = (s, r = document) => r.querySelector(s);
 const qsa = (s, r = document) => [...r.querySelectorAll(s)];
 const esc = v => String(v ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-const today = () => new Date().toISOString().split('T')[0];
+
+// IMPORTANT: never use toISOString() for local dates — it returns UTC
+// which is yesterday in AU timezones before ~10-11am
+function localISO(d) {
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+const today = () => localISO(new Date());
 
 function FD(iso)   { return iso ? new Date(iso+'T00:00:00').toLocaleDateString('en-AU',{weekday:'long',day:'numeric',month:'long',year:'numeric'}) : ''; }
 function FDS(iso)  { return iso ? new Date(iso+'T00:00:00').toLocaleDateString('en-AU',{day:'numeric',month:'short'}) : ''; }
@@ -29,11 +35,11 @@ function weekStart(offset=0) {
   const d = new Date(); d.setHours(0,0,0,0);
   const diff = (d.getDay()===0 ? -6 : 1-d.getDay()) + offset*7;
   d.setDate(d.getDate()+diff);
-  return d.toISOString().split('T')[0];
+  return localISO(d);
 }
 function addDays(iso,n) {
   const d = new Date(iso+'T00:00:00'); d.setDate(d.getDate()+n);
-  return d.toISOString().split('T')[0];
+  return localISO(d);
 }
 function getList(key) { try { return JSON.parse(state.allData['rx3_'+key]||'[]'); } catch(e){ return []; } }
 function initials(e) { return ((e.first||'')[0]||'')+((e.last||'')[0]||''); }
@@ -161,6 +167,7 @@ function buildApp() {
     </div>`;
   qsa('.tab').forEach(t=>t.addEventListener('click',()=>nav(t.dataset.view)));
   window.addEventListener('scroll', syncTopbar, {passive:true});
+  initPullToRefresh();
   renderAll();
   startSync();
   startTicker();
@@ -592,7 +599,7 @@ function renderHours() {
   const ws     = weekStart(0), we=addDays(ws,6);
   const now    = new Date();
   const ms     = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-01`;
-  const me     = new Date(now.getFullYear(),now.getMonth()+1,0).toISOString().split('T')[0];
+  const me     = localISO(new Date(now.getFullYear(),now.getMonth()+1,0));
 
   const wkH  = shifts.filter(s=>s.date>=ws&&s.date<=we).reduce((t,s)=>t+shiftHrs(s),0);
   const moH  = shifts.filter(s=>s.date>=ms&&s.date<=me).reduce((t,s)=>t+shiftHrs(s),0);
@@ -644,6 +651,73 @@ function renderProfile() {
     <div style="margin-top:24px;text-align:center">
       <button class="btn btn-secondary" onclick="signOut()">Sign out</button>
     </div>`;
+}
+
+// ── PULL TO REFRESH ────────────────────────────────────────────
+function initPullToRefresh() {
+  let startY = 0, pulling = false, indicator = null;
+  const THRESHOLD = 72; // px to pull before triggering
+
+  function getIndicator() {
+    if (!indicator) {
+      indicator = document.createElement('div');
+      indicator.id = 'ptr-indicator';
+      indicator.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:999;display:flex;align-items:center;justify-content:center;height:0;overflow:hidden;background:rgba(83,74,183,.08);transition:height .2s,opacity .2s;font-size:13px;font-weight:600;color:#534AB7;letter-spacing:.04em;gap:8px';
+      indicator.innerHTML = '<span id="ptr-spinner" style="display:inline-block;transition:transform .3s">↓</span><span id="ptr-label">Pull to refresh</span>';
+      document.body.appendChild(indicator);
+    }
+    return indicator;
+  }
+
+  document.addEventListener('touchstart', e => {
+    if (window.scrollY === 0) { startY = e.touches[0].clientY; pulling = true; }
+  }, {passive:true});
+
+  document.addEventListener('touchmove', e => {
+    if (!pulling) return;
+    const dy = e.touches[0].clientY - startY;
+    if (dy <= 0) { pulling = false; return; }
+    const ind = getIndicator();
+    const progress = Math.min(dy / THRESHOLD, 1);
+    ind.style.height = Math.min(dy * 0.4, THRESHOLD * 0.6) + 'px';
+    ind.style.opacity = progress;
+    qs('#ptr-spinner').style.transform = `rotate(${progress * 180}deg)`;
+    qs('#ptr-label').textContent = progress >= 1 ? 'Release to refresh' : 'Pull to refresh';
+  }, {passive:true});
+
+  document.addEventListener('touchend', async e => {
+    if (!pulling) return;
+    pulling = false;
+    const dy = e.changedTouches[0].clientY - startY;
+    const ind = getIndicator();
+    if (dy >= THRESHOLD) {
+      // Triggered — show spinner and refresh
+      ind.style.height = '44px';
+      qs('#ptr-spinner').style.transform = 'rotate(360deg)';
+      qs('#ptr-label').textContent = 'Refreshing…';
+      qs('#ptr-spinner').style.animation = 'ptr-spin .8s linear infinite';
+      if (!qs('#ptr-style')) {
+        const s = document.createElement('style');
+        s.id = 'ptr-style';
+        s.textContent = '@keyframes ptr-spin{to{transform:rotate(360deg)}}';
+        document.head.appendChild(s);
+      }
+      try {
+        const res = await gasGet('getAll');
+        if (res.ok) {
+          state.allData = res.data || {};
+          const fresh = getList('staff').find(s => s.id === state.emp.id);
+          if (fresh) state.emp = fresh;
+          renderAll();
+          toast('Updated ✓', 'success', 1500);
+        }
+      } catch(e) { toast('Could not refresh — check connection.', 'error'); }
+    }
+    // Collapse indicator
+    ind.style.height = '0';
+    ind.style.opacity = '0';
+    if (qs('#ptr-spinner')) qs('#ptr-spinner').style.animation = '';
+  }, {passive:true});
 }
 
 // ── LOCAL TICKER — updates clock and date every second ─────────

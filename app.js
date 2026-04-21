@@ -4,7 +4,7 @@
 // ============================================================
 
 const CONFIG = {
-  GAS_URL: 'https://script.google.com/a/macros/dukasa.com.au/s/AKfycbwVtsJR6TXx3y3gAPw27MU_d_d54hHQVC9ZPdibYYF3blBwa404-Z5kLMA-uUNdXzGw/exec',
+  GAS_URL: 'https://script.google.com/macros/s/AKfycbwVtsJR6TXx3y3gAPw27MU_d_d54hHQVC9ZPdibYYF3blBwa404-Z5kLMA-uUNdXzGw/exec',
   API_KEY: '181049d1-b062-448a-a267-64824f1ef054',
 };
 
@@ -78,18 +78,23 @@ async function gasGet(action, params = {}) {
   url.searchParams.set('key', CONFIG.API_KEY);
   Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v));
   const res = await fetch(url.toString());
-  if (!res.ok) throw new Error('GAS GET failed: ' + res.status);
-  return res.json();
+  if (!res.ok) throw new Error('Server error ' + res.status);
+  const text = await res.text();
+  try { return JSON.parse(text); }
+  catch(e) { throw new Error('Bad response from server — check GAS URL is correct'); }
 }
 
 async function gasPost(body) {
+  // Must use Content-Type: text/plain to avoid CORS preflight OPTIONS request.
+  // GAS does not support OPTIONS responses, so application/json would be blocked.
   const res = await fetch(CONFIG.GAS_URL, {
     method: 'POST',
-    headers: { 'Content-Type': 'text/plain' }, // GAS requires text/plain for doPost
+    headers: { 'Content-Type': 'text/plain' },
     body: JSON.stringify({ ...body, key: CONFIG.API_KEY }),
   });
   if (!res.ok) throw new Error('GAS POST failed: ' + res.status);
-  return res.json();
+  const text = await res.text();
+  try { return JSON.parse(text); } catch(e) { return { ok: false, error: 'Bad response: ' + text.slice(0, 100) }; }
 }
 
 async function saveList(key, arr) {
@@ -160,7 +165,7 @@ async function doLogin() {
     initApp();
   } catch(err) {
     errEl.style.display = 'block';
-    errEl.textContent = 'Could not connect — check your internet and try again.';
+    errEl.textContent = 'Could not connect: ' + err.message;
     btn.textContent = 'Sign in'; btn.disabled = false;
     console.error(err);
   }

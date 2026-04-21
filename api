@@ -1,0 +1,56 @@
+// Vercel serverless function — proxies requests to Google Apps Script
+// Because GAS can't set CORS headers, all browser requests go through
+// this server-side function instead, which has no CORS restrictions.
+
+const GAS_URL = process.env.GAS_URL;
+
+export default async function handler(req, res) {
+  // Allow requests from any origin (the proxy itself handles CORS)
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+
+  // Handle preflight
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+
+  if (!GAS_URL) {
+    return res.status(500).json({ ok: false, error: 'GAS_URL environment variable not set' });
+  }
+
+  try {
+    if (req.method === 'GET') {
+      // Forward all query params to GAS
+      const params = new URLSearchParams(req.query).toString();
+      const url = params ? `${GAS_URL}?${params}` : GAS_URL;
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: { 'Accept': 'application/json' },
+        redirect: 'follow',
+      });
+      const text = await response.text();
+      res.setHeader('Content-Type', 'application/json');
+      return res.status(200).send(text);
+
+    } else if (req.method === 'POST') {
+      // Forward JSON body to GAS as text/plain (required by GAS doPost)
+      const body = typeof req.body === 'string' ? req.body : JSON.stringify(req.body);
+      const response = await fetch(GAS_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain' },
+        body: body,
+        redirect: 'follow',
+      });
+      const text = await response.text();
+      res.setHeader('Content-Type', 'application/json');
+      return res.status(200).send(text);
+    }
+
+    return res.status(405).json({ ok: false, error: 'Method not allowed' });
+
+  } catch (err) {
+    console.error('Proxy error:', err.message);
+    return res.status(502).json({ ok: false, error: 'Proxy failed: ' + err.message });
+  }
+}

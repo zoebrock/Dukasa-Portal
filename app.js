@@ -333,23 +333,49 @@ function renderRoster() {
 window.rNav = function(d) { state.weekOffset+=d; renderRoster(); };
 
 window.openLate = function() {
-  const c=qs('#late-wrap'); if(!c) return;
-  c.innerHTML=`
-    <div class="card" style="margin-top:14px;border-color:rgba(186,117,23,.3);background:rgba(186,117,23,.05)">
-      <div style="font-weight:700;color:#BA7517;margin-bottom:14px">⏱ Running late</div>
+  // Remove any existing modal
+  const existing = qs('#late-modal');
+  if (existing) existing.remove();
+
+  const modal = document.createElement('div');
+  modal.id = 'late-modal';
+  modal.style.cssText = 'position:fixed;inset:0;z-index:500;display:flex;align-items:flex-end;justify-content:center;background:rgba(0,0,0,.45);backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);animation:fadeIn .2s ease';
+  modal.innerHTML = `
+    <div style="width:100%;max-width:520px;background:#fff;border-radius:22px 22px 0 0;padding:24px 20px calc(24px + env(safe-area-inset-bottom,0px));animation:slideUp .28s cubic-bezier(.22,1,.36,1)">
+      <div style="width:36px;height:4px;background:rgba(24,24,22,.15);border-radius:2px;margin:0 auto 20px"></div>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px">
+        <div style="font-family:'DM Serif Display',Georgia,serif;font-size:1.4rem;color:#181816">Running late</div>
+        <button onclick="qs('#late-modal').remove()" style="width:32px;height:32px;border-radius:50%;background:rgba(24,24,22,.07);display:flex;align-items:center;justify-content:center;font-size:16px;color:#58584e;border:none;cursor:pointer">✕</button>
+      </div>
       <div class="form-grid">
-        <div class="input-wrap"><label>Reason *</label><textarea class="textarea" id="late-r" rows="2" placeholder="e.g. Traffic, transport delay..." style="min-height:64px"></textarea></div>
-        <div class="input-wrap"><label>Estimated arrival *</label><input class="input" type="time" id="late-eta"></div>
-        <label style="display:flex;align-items:center;gap:10px;font-size:.9rem;font-weight:600;cursor:pointer;padding:10px;background:var(--surface-2);border-radius:var(--r-sm)">
-          <input type="checkbox" id="late-c" style="width:18px;height:18px;accent-color:#534AB7"> I have contacted my manager
+        <div class="input-wrap">
+          <label>Reason <span style="color:#A32D2D">*</span></label>
+          <textarea class="textarea" id="late-r" rows="2" placeholder="e.g. Traffic, transport delay..." style="min-height:72px"></textarea>
+        </div>
+        <div class="input-wrap">
+          <label>Estimated arrival time <span style="color:#A32D2D">*</span></label>
+          <input class="input" type="time" id="late-eta">
+        </div>
+        <label style="display:flex;align-items:center;gap:12px;font-size:.9rem;font-weight:600;cursor:pointer;padding:12px 14px;background:rgba(24,24,22,.04);border-radius:var(--r-sm);border:1px solid var(--border)">
+          <input type="checkbox" id="late-c" style="width:20px;height:20px;accent-color:#534AB7;cursor:pointer;flex-shrink:0">
+          I have contacted my manager
         </label>
-        <div id="late-err" style="display:none;color:#A32D2D;font-size:.82rem">⚠ Please fill in reason and arrival time.</div>
-        <div class="btn-row full-span">
-          <button class="btn btn-secondary" onclick="qs('#late-wrap').innerHTML=''">Cancel</button>
-          <button class="btn btn-primary" onclick="submitLate()" style="background:#BA7517">Notify manager</button>
+        <div id="late-err" style="display:none;color:#A32D2D;font-size:.82rem;padding:8px 12px;background:rgba(163,45,45,.06);border-radius:var(--r-sm)">⚠ Please fill in both the reason and estimated arrival time.</div>
+        <div class="btn-row full-span" style="margin-top:4px">
+          <button class="btn btn-secondary" style="flex:1" onclick="qs('#late-modal').remove()">Cancel</button>
+          <button class="btn btn-primary" style="flex:1;background:#BA7517;box-shadow:0 4px 16px rgba(186,117,23,.3)" onclick="submitLate()">Notify manager</button>
         </div>
       </div>
-    </div>`;
+    </div>
+    <style>
+      @keyframes fadeIn { from{opacity:0} to{opacity:1} }
+      @keyframes slideUp { from{transform:translateY(100%)} to{transform:translateY(0)} }
+    </style>`;
+  // Tap backdrop to dismiss
+  modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
+  document.body.appendChild(modal);
+  // Focus reason field after animation
+  setTimeout(() => qs('#late-r')?.focus(), 300);
 };
 
 window.submitLate = async function() {
@@ -359,13 +385,18 @@ window.submitLate = async function() {
   if (errEl) errEl.style.display='none';
   const td=today(), shift=getList('shifts').find(s=>s.empId===state.emp.id&&s.date===td&&s.published);
   if (!shift) return;
+  // Show sending state
+  const sendBtn = qs('#late-modal .btn-primary');
+  if (sendBtn) { sendBtn.textContent='Sending…'; sendBtn.disabled=true; }
   try {
     await gasPost({action:'sendEmail',fn:'sendRunningLateNotification',
       payload:{empId:state.emp.id,date:td,shiftStart:shift.start,shiftEnd:shift.end,reason,eta,contacted}});
-    const c=qs('#late-wrap');
-    if(c) c.innerHTML=`<div class="card" style="margin-top:14px;border-color:rgba(15,110,86,.2);background:rgba(15,110,86,.06)"><span style="font-weight:600;color:#0F6E56">✓ Your manager has been notified.</span></div>`;
-    toast('Manager notified.','success');
-  } catch(e){ toast('Could not send — contact your manager directly.','error'); }
+    qs('#late-modal')?.remove();
+    toast('Your manager has been notified. ✓','success');
+  } catch(e){
+    if(sendBtn){ sendBtn.textContent='Notify manager'; sendBtn.disabled=false; }
+    toast('Could not send — please contact your manager directly.','error');
+  }
 };
 
 // ── LEAVE ──────────────────────────────────────────────────────

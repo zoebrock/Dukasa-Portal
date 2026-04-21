@@ -2,309 +2,56 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta
-    name="viewport"
-    content="width=device-width, initial-scale=1, viewport-fit=cover"
-  />
-  <title>RosterRx — Staff Portal</title>
-  <link rel="stylesheet" href="style.css" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#534AB7" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-title" content="Dukasa" />
+  <link rel="manifest" href="/manifest.json" />
+  <link rel="apple-touch-icon" href="/icons/icon-180.png" />
+  <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
+  <title>Dukasa Staff Portal</title>
+  <link rel="stylesheet" href="./style.css" />
 </head>
 <body>
-  <div class="app-shell">
-    <header class="topbar">
-      <div class="brand">
-        <div class="brand-title">💊 RosterRx</div>
-        <div class="brand-subtitle">Admin Assistant</div>
+  <div id="app" class="app-shell">
+    <header class="topbar glass">
+      <div class="brand-wrap">
+        <div class="brand">💊 RosterRx</div>
+        <div class="brand-sub">Admin Assistant</div>
       </div>
-
       <div class="topbar-actions">
-        <div class="avatar">ZB</div>
-        <button class="ghost-btn">Sign out</button>
+        <div class="avatar" id="avatarInitials">ZB</div>
+        <button class="btn btn-secondary btn-sm" id="signOutBtn">Sign out</button>
       </div>
     </header>
 
-    <main class="app-main" id="appMain">
-      <!-- HOME -->
-      <section class="page active" id="page-home">
-        <div class="page-header home-header">
-          <div>
-            <h1>Hello, Zoe! 👋</h1>
-            <p class="muted large">Sunday 19 April</p>
-          </div>
-          <div class="time-block">
-            <div class="time-large">04:30 pm</div>
-            <div class="muted">local time</div>
-          </div>
-        </div>
-
-        <div class="section">
-          <div class="notice-card">No shift scheduled today.</div>
-        </div>
-
-        <div class="section">
-          <div class="section-label">THIS WEEK AT A GLANCE</div>
-          <div class="week-strip" id="weekStrip"></div>
-          <div class="summary-pill">No shift today</div>
-        </div>
-
-        <div class="section">
-          <div class="section-label">UPCOMING SHIFTS</div>
-          <div id="upcomingShifts"></div>
-        </div>
-      </section>
-
-      <!-- ROSTER -->
-      <section class="page" id="page-roster">
-        <div class="page-header">
-          <h1>My roster</h1>
-          <p class="muted">13 Apr – 19 Apr 2026</p>
-        </div>
-
-        <div class="section">
-          <div class="inline-actions">
-            <button class="ghost-btn small">‹ Previous week</button>
-            <button class="ghost-btn small">Next week ›</button>
-          </div>
-        </div>
-
-        <div class="section" id="rosterList"></div>
-
-        <div class="section">
-          <div class="section-label">ALSO WORKING TODAY</div>
-          <p class="muted">No colleagues on shift today.</p>
-        </div>
-      </section>
-
-      <!-- LEAVE -->
-      <section class="page" id="page-leave">
-        <div class="page-header page-header-row">
-          <div>
-            <h1>Leave</h1>
-          </div>
-          <button class="primary-btn" onclick="openLeaveModal()">+ Request leave</button>
-        </div>
-
-        <div class="section">
-          <div class="section-label">PENDING REQUESTS</div>
-          <p class="muted">No pending requests.</p>
-        </div>
-
-        <div class="section">
-          <div class="section-label">HISTORY</div>
-          <div id="leaveHistory"></div>
-        </div>
-
-        <div class="section">
-          <div class="section-label">SICK DAYS & MEDICAL CERTIFICATES</div>
-          <div id="sickDays"></div>
-        </div>
-      </section>
-
-      <!-- OT -->
-      <section class="page" id="page-ot">
-        <div class="page-header page-header-row">
-          <div>
-            <h1>OT</h1>
-          </div>
-          <button class="primary-btn" onclick="openOTModal()">+ Request OT</button>
-        </div>
-
-        <div class="section">
-          <div class="section-label">PENDING</div>
-          <p class="muted">No OT requests pending.</p>
-        </div>
-
-        <div class="section">
-          <div class="section-label">HISTORY</div>
-          <div id="otHistory"></div>
-        </div>
-      </section>
-
-      <!-- HOURS -->
-      <section class="page" id="page-hours">
-        <div class="page-header">
-          <h1>Hours</h1>
-          <p class="muted">Your recent totals</p>
-        </div>
-
-        <div class="section">
-          <div class="metric-card">
-            <div>
-              <div class="metric-label">This week</div>
-              <div class="metric-value">17.0h</div>
-            </div>
-            <div class="metric-label">2 shifts worked</div>
-          </div>
-        </div>
-
-        <div class="section">
-          <div class="metric-card">
-            <div>
-              <div class="metric-label">Last week</div>
-              <div class="metric-value">34.0h</div>
-            </div>
-            <div class="metric-label">4 shifts worked</div>
-          </div>
-        </div>
-      </section>
-
-      <!-- PROFILE -->
-      <section class="page" id="page-profile">
-        <div class="page-header">
-          <h1>Profile</h1>
-          <p class="muted">Staff details</p>
-        </div>
-
-        <div class="section">
-          <div class="profile-card">
-            <div class="profile-row">
-              <span class="profile-label">Name</span>
-              <span>Zoe Brock</span>
-            </div>
-            <div class="profile-row">
-              <span class="profile-label">Role</span>
-              <span>Admin Assistant</span>
-            </div>
-            <div class="profile-row">
-              <span class="profile-label">Location</span>
-              <span>Melbourne</span>
-            </div>
-          </div>
-        </div>
-      </section>
+    <main class="content" id="content">
+      <section id="view-home" class="view active"></section>
+      <section id="view-roster" class="view"></section>
+      <section id="view-leave" class="view"></section>
+      <section id="view-ot" class="view"></section>
+      <section id="view-hours" class="view"></section>
+      <section id="view-profile" class="view"></section>
     </main>
 
-    <nav class="tabbar">
-      <button class="tab active" data-page="home">
-        <span class="tab-icon">🏠</span>
-        <span class="tab-label">Home</span>
-      </button>
-      <button class="tab" data-page="roster">
-        <span class="tab-icon">📆</span>
-        <span class="tab-label">Roster</span>
-      </button>
-      <button class="tab" data-page="leave">
-        <span class="tab-icon">🌈</span>
-        <span class="tab-label">Leave</span>
-      </button>
-      <button class="tab" data-page="ot">
-        <span class="tab-icon">⏰</span>
-        <span class="tab-label">OT</span>
-      </button>
-      <button class="tab" data-page="hours">
-        <span class="tab-icon">🕘</span>
-        <span class="tab-label">Hours</span>
-      </button>
-      <button class="tab" data-page="profile">
-        <span class="tab-icon">👤</span>
-        <span class="tab-label">Profile</span>
-      </button>
+    <nav class="tabbar glass" aria-label="Primary">
+      <button class="tab active" data-view="home"><span class="tab-icon">🏠</span><span class="tab-label">Home</span></button>
+      <button class="tab" data-view="roster"><span class="tab-icon">📅</span><span class="tab-label">Roster</span></button>
+      <button class="tab" data-view="leave"><span class="tab-icon">🌈</span><span class="tab-label">Leave</span></button>
+      <button class="tab" data-view="ot"><span class="tab-icon">⏰</span><span class="tab-label">OT</span></button>
+      <button class="tab" data-view="hours"><span class="tab-icon">🕘</span><span class="tab-label">Hours</span></button>
+      <button class="tab" data-view="profile"><span class="tab-icon">👤</span><span class="tab-label">Profile</span></button>
     </nav>
   </div>
 
-  <!-- LEAVE MODAL -->
-  <div class="modal-overlay" id="m-leave">
-    <div class="modal-sheet">
-      <div class="sheet-handle"></div>
-      <div class="modal-header">
-        <h2>New leave request</h2>
-        <button class="icon-btn" onclick="closeModal('m-leave')">✕</button>
-      </div>
-
-      <form class="modal-form" onsubmit="submitLeaveRequest(event)">
-        <div class="form-group">
-          <label for="leaveType">Leave type</label>
-          <select id="leaveType" required>
-            <option>Annual Leave</option>
-            <option>Personal Leave</option>
-            <option>Compassionate Leave</option>
-            <option>Unpaid Leave</option>
-          </select>
-        </div>
-
-        <div class="form-grid">
-          <div class="form-group">
-            <label for="leaveFrom">From</label>
-            <input id="leaveFrom" type="date" required />
-          </div>
-          <div class="form-group">
-            <label for="leaveTo">To</label>
-            <input id="leaveTo" type="date" required />
-          </div>
-        </div>
-
-        <div class="form-group">
-          <label for="leaveNotes">Notes</label>
-          <textarea
-            id="leaveNotes"
-            rows="5"
-            placeholder="Add any context here"
-          ></textarea>
-        </div>
-
-        <div class="modal-actions">
-          <button type="button" class="ghost-btn" onclick="closeModal('m-leave')">
-            Cancel
-          </button>
-          <button type="submit" class="primary-btn">Submit request</button>
-        </div>
-      </form>
+  <template id="emptyStateTemplate">
+    <div class="card empty-state">
+      <div class="empty-title"></div>
+      <div class="empty-copy"></div>
     </div>
-  </div>
+  </template>
 
-  <!-- OT MODAL -->
-  <div class="modal-overlay" id="m-ot">
-    <div class="modal-sheet">
-      <div class="sheet-handle"></div>
-      <div class="modal-header">
-        <h2>New OT request</h2>
-        <button class="icon-btn" onclick="closeModal('m-ot')">✕</button>
-      </div>
-
-      <form class="modal-form" onsubmit="submitOTRequest(event)">
-        <div class="form-grid">
-          <div class="form-group">
-            <label for="otDate">Date</label>
-            <input id="otDate" type="date" required />
-          </div>
-          <div class="form-group">
-            <label for="otHours">Hours requested</label>
-            <input id="otHours" type="number" min="0.5" step="0.5" placeholder="2.0" required />
-          </div>
-        </div>
-
-        <div class="form-grid">
-          <div class="form-group">
-            <label for="otStart">Start</label>
-            <input id="otStart" type="time" required />
-          </div>
-          <div class="form-group">
-            <label for="otEnd">End</label>
-            <input id="otEnd" type="time" required />
-          </div>
-        </div>
-
-        <div class="form-group">
-          <label for="otReason">Reason</label>
-          <textarea
-            id="otReason"
-            rows="5"
-            placeholder="Briefly explain why OT is required"
-          ></textarea>
-        </div>
-
-        <div class="modal-actions">
-          <button type="button" class="ghost-btn" onclick="closeModal('m-ot')">
-            Cancel
-          </button>
-          <button type="submit" class="primary-btn">Submit OT</button>
-        </div>
-      </form>
-    </div>
-  </div>
-
-  <div class="toast" id="toast"></div>
-
-  <script src="app.js"></script>
+  <script src="./app.js"></script>
 </body>
 </html>

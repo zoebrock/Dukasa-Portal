@@ -4,7 +4,7 @@
 // ============================================================
 
 const CONFIG = {
-  GAS_URL: 'https://script.google.com/macros/s/AKfycbwVtsJR6TXx3y3gAPw27MU_d_d54hHQVC9ZPdibYYF3blBwa404-Z5kLMA-uUNdXzGw/exec',
+  GAS_URL: 'https://script.google.com/macros/s/AKfycbw7x3V1dsrpZDVNyEwv1xflFEx2bOqDpL-gw5ZQnwAQxOywz0d3PD1WntJxrlS0EFC5/exec',
   API_KEY: '181049d1-b062-448a-a267-64824f1ef054',
 };
 

@@ -1,195 +1,148 @@
 // ============================================================
 //  Dukasa Staff Portal — Vercel App
-//  Connects to Google Apps Script backend via /api/gas proxy
+//  Live data via /api/gas proxy → Google Apps Script
 // ============================================================
 
-const CONFIG = {
-  PROXY: '/api/gas',
-};
+const CONFIG = { PROXY: '/api/gas' };
 
-// ── STATE ────────────────────────────────────────────────────
 const state = {
   currentView: 'home',
   emp: null,
   allData: {},
-  currentWeekOffset: 0,
+  weekOffset: 0,
 };
 
-// ── HELPERS ──────────────────────────────────────────────────
+// ── UTILS ─────────────────────────────────────────────────────
 const qs  = (s, r = document) => r.querySelector(s);
 const qsa = (s, r = document) => [...r.querySelectorAll(s)];
 const esc = v => String(v ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+const today = () => new Date().toISOString().split('T')[0];
 
-function today() { return new Date().toISOString().split('T')[0]; }
+function FD(iso)   { return iso ? new Date(iso+'T00:00:00').toLocaleDateString('en-AU',{weekday:'long',day:'numeric',month:'long',year:'numeric'}) : ''; }
+function FDS(iso)  { return iso ? new Date(iso+'T00:00:00').toLocaleDateString('en-AU',{day:'numeric',month:'short'}) : ''; }
+function FDOW(iso) { return iso ? new Date(iso+'T00:00:00').toLocaleDateString('en-AU',{weekday:'long'}) : ''; }
 
-function FD(iso) {
-  if (!iso) return '';
-  return new Date(iso + 'T00:00:00').toLocaleDateString('en-AU', {weekday:'long', day:'numeric', month:'long', year:'numeric'});
-}
-function FDS(iso) {
-  if (!iso) return '';
-  return new Date(iso + 'T00:00:00').toLocaleDateString('en-AU', {day:'numeric', month:'short'});
-}
-function FDOW(iso) {
-  if (!iso) return '';
-  return new Date(iso + 'T00:00:00').toLocaleDateString('en-AU', {weekday:'long'});
-}
-function parseTime(t) {
-  if (!t) return 0;
-  const [h, m] = t.split(':').map(Number);
-  return h * 60 + m;
-}
-function shiftHours(s) {
-  return Math.max(0, (parseTime(s.end) - parseTime(s.start) - (s.breakMin || 0)) / 60);
-}
-function weekStartDate(offset = 0) {
-  const d = new Date();
-  d.setHours(0, 0, 0, 0);
-  const dow = d.getDay();
-  const diff = (dow === 0 ? -6 : 1 - dow) + offset * 7;
-  d.setDate(d.getDate() + diff);
+function parseTime(t) { if (!t) return 0; const [h,m] = t.split(':').map(Number); return h*60+m; }
+function shiftHrs(s)  { return Math.max(0,(parseTime(s.end)-parseTime(s.start)-(s.breakMin||0))/60); }
+
+function weekStart(offset=0) {
+  const d = new Date(); d.setHours(0,0,0,0);
+  const diff = (d.getDay()===0 ? -6 : 1-d.getDay()) + offset*7;
+  d.setDate(d.getDate()+diff);
   return d.toISOString().split('T')[0];
 }
-function addDays(iso, n) {
-  const d = new Date(iso + 'T00:00:00');
-  d.setDate(d.getDate() + n);
+function addDays(iso,n) {
+  const d = new Date(iso+'T00:00:00'); d.setDate(d.getDate()+n);
   return d.toISOString().split('T')[0];
 }
-function getList(key) {
-  try { return JSON.parse(state.allData['rx3_' + key] || '[]'); } catch(e) { return []; }
-}
-function initials(emp) {
-  if (!emp) return '?';
-  return ((emp.first || '')[0] || '') + ((emp.last || '')[0] || '');
-}
+function getList(key) { try { return JSON.parse(state.allData['rx3_'+key]||'[]'); } catch(e){ return []; } }
+function initials(e) { return ((e.first||'')[0]||'')+((e.last||'')[0]||''); }
 
-// ── TOAST ────────────────────────────────────────────────────
-function toast(msg, type = 'info', duration = 3500) {
-  let el = qs('#toast');
+// ── TOAST ──────────────────────────────────────────────────────
+function toast(msg, type='info', dur=3500) {
+  let el = qs('#sp-toast');
   if (!el) {
-    el = document.createElement('div');
-    el.id = 'toast';
-    el.style.cssText = 'position:fixed;bottom:90px;left:50%;transform:translateX(-50%);padding:12px 20px;border-radius:12px;font-size:14px;font-weight:600;color:#fff;z-index:9999;max-width:88vw;text-align:center;pointer-events:none;transition:opacity .3s;box-shadow:0 8px 24px rgba(0,0,0,.5)';
+    el = document.createElement('div'); el.id='sp-toast';
+    el.style.cssText='position:fixed;bottom:90px;left:50%;transform:translateX(-50%);padding:11px 20px;border-radius:12px;font-size:14px;font-weight:600;color:#fff;z-index:9999;max-width:88vw;text-align:center;pointer-events:none;transition:opacity .3s;box-shadow:0 4px 16px rgba(0,0,0,.15)';
     document.body.appendChild(el);
   }
-  const bg = {info:'#534AB7', success:'#0F6E56', error:'#A32D2D', warning:'#BA7517'}[type] || '#534AB7';
-  el.style.background = bg;
-  el.style.opacity = '1';
-  el.textContent = msg;
-  clearTimeout(el._t);
-  el._t = setTimeout(() => { el.style.opacity = '0'; }, duration);
+  el.style.background = {success:'#0F6E56',error:'#A32D2D',warning:'#BA7517',info:'#534AB7'}[type]||'#534AB7';
+  el.style.opacity='1'; el.textContent=msg;
+  clearTimeout(el._t); el._t=setTimeout(()=>el.style.opacity='0', dur);
 }
 
-// ── GAS API ──────────────────────────────────────────────────
-async function gasGet(action, params = {}) {
+// ── API ────────────────────────────────────────────────────────
+async function gasGet(action, params={}) {
   const url = new URL(CONFIG.PROXY, window.location.origin);
   url.searchParams.set('action', action);
-  Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v));
-  const res = await fetch(url.toString());
-  if (!res.ok) throw new Error('Server error ' + res.status);
+  Object.entries(params).forEach(([k,v])=>url.searchParams.set(k,v));
+  const res  = await fetch(url.toString());
   const text = await res.text();
-  try { return JSON.parse(text); }
-  catch(e) { throw new Error('Bad response — check GAS_URL in Vercel env vars'); }
+  try { return JSON.parse(text); } catch(e) { throw new Error('Bad response from server'); }
 }
-
 async function gasPost(body) {
-  const res = await fetch(CONFIG.PROXY, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) throw new Error('Server error ' + res.status);
+  const res  = await fetch(CONFIG.PROXY, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
   const text = await res.text();
-  try { return JSON.parse(text); }
-  catch(e) { return { ok: false, error: text.slice(0, 100) }; }
+  try { return JSON.parse(text); } catch(e) { return {ok:false,error:text.slice(0,100)}; }
 }
-
 async function saveList(key, arr) {
-  state.allData['rx3_' + key] = JSON.stringify(arr);
-  return gasPost({ action: 'set', dataKey: 'rx3_' + key, value: JSON.stringify(arr) });
+  state.allData['rx3_'+key] = JSON.stringify(arr);
+  return gasPost({action:'set', dataKey:'rx3_'+key, value:JSON.stringify(arr)});
 }
 
-// ── AUTH ─────────────────────────────────────────────────────
-function showLogin(errorMsg = '') {
+// ── AUTH ───────────────────────────────────────────────────────
+function showLogin(err='') {
   document.body.innerHTML = `
-    <div style="min-height:100dvh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px;background:var(--bg)">
+    <div style="min-height:100dvh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px;background:#f0efe9">
       <div style="width:100%;max-width:360px">
         <div style="text-align:center;margin-bottom:32px">
-          <div style="font-size:40px;margin-bottom:10px">💊</div>
-          <div style="font-family:'DM Serif Display',Georgia,serif;font-size:1.8rem;color:var(--gold);letter-spacing:-.02em">Dukasa</div>
-          <div style="font-size:.8rem;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:var(--text-3);margin-top:4px">Staff Portal</div>
+          <div style="font-size:36px;margin-bottom:8px">💊</div>
+          <div style="font-family:'DM Serif Display',Georgia,serif;font-size:1.6rem;color:#534AB7">RosterRx</div>
+          <div style="font-size:.78rem;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:#98988f;margin-top:3px">Staff Portal</div>
         </div>
-        ${errorMsg ? `<div style="background:var(--red-soft);border:1px solid rgba(248,113,113,.2);border-radius:12px;padding:12px 16px;font-size:13px;color:var(--red);margin-bottom:16px;text-align:center">${esc(errorMsg)}</div>` : ''}
-        <div style="background:var(--surface);border:1px solid var(--border);border-radius:20px;padding:24px">
+        ${err?`<div style="background:rgba(163,45,45,.08);border:1px solid rgba(163,45,45,.2);border-radius:12px;padding:11px 16px;font-size:13px;color:#A32D2D;margin-bottom:14px;text-align:center">${esc(err)}</div>`:''}
+        <div style="background:#fff;border:1px solid rgba(24,24,22,.09);border-radius:22px;padding:24px;box-shadow:0 4px 24px rgba(0,0,0,.06)">
           <div style="margin-bottom:14px">
-            <label style="font-size:.72rem;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--text-3);display:block;margin-bottom:7px">Email</label>
-            <input id="login-email" type="email" autocomplete="email" placeholder="your@dukasa.com.au" class="input">
+            <label style="font-size:.7rem;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:#58584e;display:block;margin-bottom:6px">Email</label>
+            <input id="l-email" type="email" autocomplete="email" placeholder="your@dukasa.com.au" class="input" style="background:#f5f5f0">
           </div>
           <div style="margin-bottom:20px">
-            <label style="font-size:.72rem;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--text-3);display:block;margin-bottom:7px">PIN</label>
-            <input id="login-pin" type="password" inputmode="numeric" maxlength="6" placeholder="••••" class="input" style="letter-spacing:6px;font-size:1.4rem">
+            <label style="font-size:.7rem;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:#58584e;display:block;margin-bottom:6px">PIN</label>
+            <input id="l-pin" type="password" inputmode="numeric" maxlength="6" placeholder="••••" class="input" style="letter-spacing:6px;font-size:1.4rem;background:#f5f5f0">
           </div>
-          <button id="login-btn" class="btn btn-primary" style="width:100%" onclick="doLogin()">Sign in</button>
+          <button id="l-btn" class="btn btn-primary" style="width:100%" onclick="doLogin()">Sign in</button>
         </div>
-        <p style="text-align:center;margin-top:16px;font-size:12px;color:var(--text-3)">Contact your manager if you've forgotten your PIN.</p>
+        <p style="text-align:center;margin-top:14px;font-size:12px;color:#98988f">Contact your manager if you've forgotten your PIN.</p>
       </div>
-    </div>
-  `;
-  qs('#login-pin')?.addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
-  qs('#login-email')?.addEventListener('keydown', e => { if (e.key === 'Enter') qs('#login-pin')?.focus(); });
+    </div>`;
+  qs('#l-pin')?.addEventListener('keydown', e=>{ if(e.key==='Enter') doLogin(); });
+  qs('#l-email')?.addEventListener('keydown', e=>{ if(e.key==='Enter') qs('#l-pin')?.focus(); });
 }
 
 async function doLogin() {
-  const email = (qs('#login-email')?.value || '').trim().toLowerCase();
-  const pin   = (qs('#login-pin')?.value  || '').trim();
-  const btn   = qs('#login-btn');
-  if (!email || !pin) { showLogin('Please enter your email and PIN.'); return; }
-  if (btn) { btn.textContent = 'Signing in…'; btn.disabled = true; }
+  const email = (qs('#l-email')?.value||'').trim().toLowerCase();
+  const pin   = (qs('#l-pin')?.value||'').trim();
+  const btn   = qs('#l-btn');
+  if (!email||!pin) { showLogin('Please enter your email and PIN.'); return; }
+  if (btn) { btn.textContent='Signing in…'; btn.disabled=true; }
   try {
-    const result = await gasGet('getAll');
-    if (!result.ok) throw new Error(result.error || 'Could not load data');
-    state.allData = result.data || {};
-    const staff = getList('staff');
-    const emp = staff.find(s => (s.email || '').toLowerCase() === email && String(s.pin || '') === pin);
+    const res = await gasGet('getAll');
+    if (!res.ok) throw new Error(res.error||'Could not load data');
+    state.allData = res.data||{};
+    const emp = getList('staff').find(s=>(s.email||'').toLowerCase()===email && String(s.pin||'')===pin);
     if (!emp) { showLogin('Incorrect email or PIN — please try again.'); return; }
     state.emp = emp;
-    localStorage.setItem('dukasa_session', JSON.stringify({ id: emp.id, email: emp.email, ts: Date.now() }));
-    buildShell();
-  } catch(err) {
-    showLogin('Could not connect: ' + err.message);
-  }
+    localStorage.setItem('dukasa_sx', JSON.stringify({id:emp.id, email:emp.email, ts:Date.now()}));
+    buildApp();
+  } catch(e) { showLogin('Could not connect: '+e.message); }
 }
 
-function tryRestoreSession() {
+function trySession() {
   try {
-    const s = JSON.parse(localStorage.getItem('dukasa_session') || 'null');
-    if (!s) return false;
-    if (Date.now() - s.ts > 12 * 3600 * 1000) { localStorage.removeItem('dukasa_session'); return false; }
+    const s = JSON.parse(localStorage.getItem('dukasa_sx')||'null');
+    if (!s || Date.now()-s.ts > 12*3600*1000) { localStorage.removeItem('dukasa_sx'); return false; }
     return s;
   } catch(e) { return false; }
 }
 
-function signOut() {
-  localStorage.removeItem('dukasa_session');
-  location.reload();
-}
+function signOut() { localStorage.removeItem('dukasa_sx'); location.reload(); }
 
-// ── SHELL ─────────────────────────────────────────────────────
-function buildShell() {
+// ── APP SHELL ──────────────────────────────────────────────────
+function buildApp() {
   const emp = state.emp;
   document.body.innerHTML = `
     <div id="app" class="app-shell">
-      <header class="topbar glass">
+      <header class="topbar">
         <div class="brand-wrap">
           <div class="brand">💊 RosterRx</div>
-          <div class="brand-sub" id="topbar-role">${esc(emp.role || '')}</div>
+          <div class="brand-sub">${esc(emp.role||'')}</div>
         </div>
         <div class="topbar-actions">
           <div class="avatar">${esc(initials(emp))}</div>
           <button class="btn btn-secondary btn-sm" onclick="signOut()">Sign out</button>
         </div>
       </header>
-      <main class="content" id="content">
+      <main class="content">
         <section id="view-home"    class="view active"></section>
         <section id="view-roster"  class="view"></section>
         <section id="view-leave"   class="view"></section>
@@ -197,674 +150,543 @@ function buildShell() {
         <section id="view-hours"   class="view"></section>
         <section id="view-profile" class="view"></section>
       </main>
-      <nav class="tabbar glass">
+      <nav class="tabbar">
         <button class="tab active" data-view="home">    <span class="tab-icon">🏠</span><span class="tab-label">Home</span></button>
         <button class="tab"        data-view="roster">  <span class="tab-icon">📅</span><span class="tab-label">Roster</span></button>
-        <button class="tab"        data-view="leave">   <span class="tab-icon">🌿</span><span class="tab-label">Leave</span></button>
+        <button class="tab"        data-view="leave">   <span class="tab-icon">🌈</span><span class="tab-label">Leave</span></button>
         <button class="tab"        data-view="ot">      <span class="tab-icon">⏰</span><span class="tab-label">OT</span></button>
         <button class="tab"        data-view="hours">   <span class="tab-icon">🕘</span><span class="tab-label">Hours</span></button>
         <button class="tab"        data-view="profile"> <span class="tab-icon">👤</span><span class="tab-label">Profile</span></button>
       </nav>
-    </div>
-  `;
-  qsa('.tab').forEach(tab => tab.addEventListener('click', () => switchView(tab.dataset.view)));
-  window.addEventListener('scroll', syncTopbar, { passive: true });
+    </div>`;
+  qsa('.tab').forEach(t=>t.addEventListener('click',()=>nav(t.dataset.view)));
+  window.addEventListener('scroll', syncTopbar, {passive:true});
   renderAll();
-  startSmartSync();
+  startSync();
 }
 
-function switchView(name) {
+function nav(name) {
   state.currentView = name;
-  qsa('.view').forEach(v => v.classList.toggle('active', v.id === 'view-' + name));
-  qsa('.tab').forEach(t => t.classList.toggle('active', t.dataset.view === name));
-  applyAnims(qs('#view-' + name));
-  window.scrollTo({ top: 0, behavior: 'smooth' });
+  qsa('.view').forEach(v=>v.classList.toggle('active', v.id==='view-'+name));
+  qsa('.tab').forEach(t=>t.classList.toggle('active', t.dataset.view===name));
+  anim(qs('#view-'+name));
+  window.scrollTo({top:0,behavior:'smooth'});
   syncTopbar();
 }
 
 function syncTopbar() {
-  const tb = qs('.topbar'); if (!tb) return;
-  const scrolled = window.scrollY > 8;
-  tb.style.background = scrolled ? 'rgba(14,15,20,0.95)' : 'rgba(14,15,20,0.85)';
-  tb.style.boxShadow  = scrolled ? '0 8px 32px rgba(0,0,0,.4)' : 'none';
+  const tb=qs('.topbar'); if(!tb) return;
+  const s=window.scrollY>8;
+  tb.style.boxShadow = s ? '0 4px 20px rgba(0,0,0,.08)' : 'none';
 }
 
-function applyAnims(root = document) {
+function anim(root=document) {
   if (!root) return;
-  qsa('.page-header,.card,.kpi,.week-strip,.btn-row', root).forEach((el, i) => {
-    el.classList.remove('fade-in-up', 'delay-1', 'delay-2', 'delay-3', 'delay-4');
+  qsa('.page-header,.card,.kpi,.week-strip,.btn-row',root).forEach((el,i)=>{
+    el.classList.remove('fade-in-up','delay-1','delay-2','delay-3','delay-4');
     void el.offsetWidth;
     el.classList.add('fade-in-up');
-    if (!el.classList.contains('page-header')) el.classList.add('delay-' + Math.min((i % 4) + 1, 4));
+    if (!el.classList.contains('page-header')) el.classList.add('delay-'+(Math.min((i%4)+1,4)));
   });
 }
 
 function renderAll() {
-  renderHome();
-  renderRoster();
-  renderLeave();
-  renderOT();
-  renderHours();
-  renderProfile();
-  applyAnims(qs('#view-' + state.currentView));
+  renderHome(); renderRoster(); renderLeave(); renderOT(); renderHours(); renderProfile();
+  anim(qs('#view-'+state.currentView));
 }
 
-// ── HOME ──────────────────────────────────────────────────────
+// ── HOME ───────────────────────────────────────────────────────
 function renderHome() {
-  const emp = state.emp;
-  const shifts    = getList('shifts').filter(s => s.empId === emp.id && s.published);
-  const sickDays  = getList('sickDays').filter(s => s.empId === emp.id);
-  const leaveReqs = getList('leaveRequests').filter(l => l.empId === emp.id);
-  const todayStr  = today();
-  const ws        = weekStartDate(0);
+  const emp      = state.emp;
+  const shifts   = getList('shifts').filter(s=>s.empId===emp.id&&s.published);
+  const sick     = getList('sickDays').filter(s=>s.empId===emp.id);
+  const leaves   = getList('leaveRequests').filter(l=>l.empId===emp.id);
+  const td       = today();
+  const ws       = weekStart(0);
 
-  const todayShift = shifts.find(s => s.date === todayStr);
-  const todaySick  = sickDays.find(s => s.date === todayStr);
-  const todayLeave = leaveReqs.find(l => l.status === 'approved' && l.from <= todayStr && l.to >= todayStr);
+  const todayShift = shifts.find(s=>s.date===td);
+  const todaySick  = sick.find(s=>s.date===td);
+  const todayLeave = leaves.find(l=>l.status==='approved'&&l.from<=td&&l.to>=td);
 
-  let todayCard = '';
+  let todayCard;
   if (todaySick) {
-    todayCard = `<div class="card" style="border-color:rgba(248,113,113,.3);background:var(--red-soft)"><div style="font-weight:700;color:var(--red)">🤒 Sick day recorded today</div></div>`;
+    todayCard=`<div class="card card-compact" style="border-color:rgba(163,45,45,.25);background:rgba(163,45,45,.06)"><span style="font-weight:600;color:#A32D2D">🤒 Sick day recorded today</span></div>`;
   } else if (todayLeave) {
-    todayCard = `<div class="card" style="border-color:rgba(62,207,142,.25);background:var(--green-soft)"><div style="font-weight:700;color:var(--green)">🏖 On approved leave today</div></div>`;
+    todayCard=`<div class="card card-compact" style="border-color:rgba(15,110,86,.2);background:rgba(15,110,86,.06)"><span style="font-weight:600;color:#0F6E56">🏖 On approved leave today</span></div>`;
   } else if (todayShift) {
-    const hrs = shiftHours(todayShift);
-    todayCard = `<div class="card card-gold">
-      <div style="font-size:.72rem;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--gold-dim);margin-bottom:6px">Today's shift</div>
-      <div style="font-family:'DM Serif Display',Georgia,serif;font-size:2rem;color:var(--gold);letter-spacing:-.03em">${esc(todayShift.start)} – ${esc(todayShift.end)}</div>
-      <div style="font-size:.82rem;color:var(--text-2);margin-top:4px">${todayShift.breakMin || 0} min break · ${hrs.toFixed(1)} hrs</div>
+    const h=shiftHrs(todayShift);
+    todayCard=`<div class="card card-purple">
+      <div style="font-size:.72rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#534AB7;margin-bottom:4px">Today's shift</div>
+      <div style="font-family:'DM Serif Display',Georgia,serif;font-size:1.9rem;letter-spacing:-.03em;color:#181816">${esc(todayShift.start)} – ${esc(todayShift.end)}</div>
+      <div class="list-copy" style="margin-top:3px">${todayShift.breakMin||0} min break · ${h.toFixed(1)} hrs</div>
     </div>`;
   } else {
-    todayCard = `<div class="card card-compact"><span class="helper-note">No shift scheduled today.</span></div>`;
+    todayCard=`<div class="card card-compact"><span class="helper-note">No shift scheduled today.</span></div>`;
   }
 
-  const weekDays = Array.from({length: 7}, (_, i) => {
-    const ds = addDays(ws, i);
-    const d  = new Date(ds + 'T00:00:00');
-    return {
-      dow: d.toLocaleDateString('en-AU', {weekday:'short'}),
-      num: d.getDate(),
-      ds,
-      hasShift: shifts.some(s => s.date === ds),
-      isSick:   sickDays.some(s => s.date === ds),
-      isToday:  ds === todayStr,
-    };
+  const week = Array.from({length:7},(_,i)=>{
+    const ds=addDays(ws,i); const d=new Date(ds+'T00:00:00');
+    return {dow:d.toLocaleDateString('en-AU',{weekday:'short'}),num:d.getDate(),ds,
+      hasShift:shifts.some(s=>s.date===ds), isSick:sick.some(s=>s.date===ds), isToday:ds===td};
   });
 
-  const upcoming = shifts
-    .filter(s => s.date > todayStr)
-    .sort((a, b) => a.date.localeCompare(b.date))
-    .slice(0, 5);
+  const upcoming = shifts.filter(s=>s.date>td).sort((a,b)=>a.date.localeCompare(b.date)).slice(0,5);
+  const now      = new Date();
 
-  const now = new Date();
-  const timeStr = now.toLocaleTimeString('en-AU', {hour: '2-digit', minute: '2-digit'});
-  const dateStr = now.toLocaleDateString('en-AU', {weekday:'long', day:'numeric', month:'long'});
-
-  qs('#view-home').innerHTML = `
+  qs('#view-home').innerHTML=`
     <div class="page-header">
       <div>
-        <h1 class="page-title">Hi, ${esc(emp.first)}! 👋</h1>
-        <div class="page-subtitle">${esc(dateStr)}</div>
+        <h1 class="page-title">Hello, ${esc(emp.first)}! 👋</h1>
+        <div class="page-subtitle">${now.toLocaleDateString('en-AU',{weekday:'long',day:'numeric',month:'long'})}</div>
       </div>
       <div class="hero-time">
-        <div class="hero-time-big">${esc(timeStr)}</div>
+        <div class="hero-time-big">${now.toLocaleTimeString('en-AU',{hour:'2-digit',minute:'2-digit'})}</div>
         <div class="hero-time-small">local time</div>
       </div>
     </div>
     ${todayCard}
-    <div class="section-label">This week</div>
+    <div class="section-label">This week at a glance</div>
     <div class="week-strip">
-      ${weekDays.map(d => `
-        <div class="week-pill ${d.isToday ? 'active' : ''}">
+      ${week.map(d=>`
+        <div class="week-pill ${d.isToday?'active':''}">
           <span class="week-pill-name">${esc(d.dow)}</span>
           <span class="week-pill-num">${d.num}</span>
-          ${d.hasShift && !d.isSick ? '<span style="display:block;width:5px;height:5px;border-radius:50%;background:var(--gold);margin:4px auto 0;opacity:.8"></span>' : ''}
-          ${d.isSick ? '<span style="display:block;font-size:9px;margin-top:3px">🤒</span>' : ''}
-        </div>
-      `).join('')}
+          ${d.hasShift&&!d.isSick?'<span style="display:block;width:5px;height:5px;border-radius:50%;background:#534AB7;margin:3px auto 0;opacity:.5"></span>':''}
+          ${d.isSick?'<span style="font-size:9px;display:block;margin-top:2px">🤒</span>':''}
+        </div>`).join('')}
     </div>
     <div class="section-label">Upcoming shifts</div>
     <div class="info-grid">
-      ${upcoming.length ? upcoming.map(s => `
+      ${upcoming.length?upcoming.map(s=>`
         <div class="card list-card">
           <div>
             <div class="list-title">${esc(FDOW(s.date))}, ${esc(FDS(s.date))}</div>
-            <div class="list-copy">${esc(s.start)} – ${esc(s.end)} · ${s.breakMin || 0}min break</div>
+            <div class="list-copy">${esc(s.start)} – ${esc(s.end)} · ${s.breakMin||0}min break</div>
           </div>
-          <div class="list-meta">${shiftHours(s).toFixed(1)}h</div>
-        </div>
-      `).join('') : '<div class="helper-note">No upcoming shifts scheduled.</div>'}
-    </div>
-  `;
+          <div class="list-meta">${shiftHrs(s).toFixed(1)}h</div>
+        </div>`).join(''):'<div class="helper-note">No upcoming shifts scheduled.</div>'}
+    </div>`;
 }
 
-// ── ROSTER ────────────────────────────────────────────────────
+// ── ROSTER ─────────────────────────────────────────────────────
 function renderRoster() {
   const emp    = state.emp;
-  const offset = state.currentWeekOffset;
-  const ws     = weekStartDate(offset);
-  const we     = addDays(ws, 6);
-  const shifts    = getList('shifts').filter(s => s.empId === emp.id && s.published);
-  const sickDays  = getList('sickDays').filter(s => s.empId === emp.id);
-  const leaveReqs = getList('leaveRequests').filter(l => l.empId === emp.id && l.status === 'approved');
-  const todayStr  = today();
+  const ws     = weekStart(state.weekOffset);
+  const we     = addDays(ws,6);
+  const shifts = getList('shifts').filter(s=>s.empId===emp.id&&s.published);
+  const sick   = getList('sickDays').filter(s=>s.empId===emp.id);
+  const leaves = getList('leaveRequests').filter(l=>l.empId===emp.id&&l.status==='approved');
+  const td     = today();
+  const wkTot  = shifts.filter(s=>s.date>=ws&&s.date<=we).reduce((t,s)=>t+shiftHrs(s),0);
 
-  const weekTotal = shifts.filter(s => s.date >= ws && s.date <= we).reduce((t, s) => t + shiftHours(s), 0);
-
-  const days = Array.from({length: 7}, (_, i) => {
-    const ds = addDays(ws, i);
-    return {
-      ds,
-      shift: shifts.find(s => s.date === ds),
-      sick:  sickDays.find(s => s.date === ds),
-      leave: leaveReqs.find(l => l.from <= ds && l.to >= ds),
-      isToday: ds === todayStr,
-    };
+  const days = Array.from({length:7},(_,i)=>{
+    const ds=addDays(ws,i);
+    return {ds, shift:shifts.find(s=>s.date===ds), sick:sick.find(s=>s.date===ds),
+      leave:leaves.find(l=>l.from<=ds&&l.to>=ds), isToday:ds===td};
   });
 
-  qs('#view-roster').innerHTML = `
+  qs('#view-roster').innerHTML=`
     <div class="page-header stack">
       <h1 class="page-title">My roster</h1>
-      <div class="page-subtitle">${esc(FDS(ws))} – ${esc(FDS(we))} · ${weekTotal.toFixed(1)} hrs</div>
-      <div class="btn-row" style="margin-top:14px">
-        <button class="btn btn-secondary btn-sm" onclick="rosterNav(-1)">‹ Previous</button>
-        <button class="btn btn-secondary btn-sm" onclick="rosterNav(0)" style="${offset === 0 ? 'color:var(--gold);border-color:var(--gold-dim)' : ''}">This week</button>
-        <button class="btn btn-secondary btn-sm" onclick="rosterNav(1)">Next ›</button>
+      <div class="page-subtitle">${esc(FDS(ws))} – ${esc(FDS(we))} 2026 · ${wkTot.toFixed(1)} hrs</div>
+      <div class="btn-row" style="margin-top:12px">
+        <button class="btn btn-secondary btn-sm" onclick="rNav(-1)">‹ Previous week</button>
+        <button class="btn btn-secondary btn-sm" onclick="rNav(1)">Next week ›</button>
       </div>
     </div>
     <div class="info-grid">
-      ${days.map(d => {
-        const dObj = new Date(d.ds + 'T00:00:00');
-        const dow  = dObj.toLocaleDateString('en-AU', {weekday:'short'});
-        const num  = dObj.getDate();
-        let statusLine = 'Day off', metaLine = '', borderStyle = '';
-
-        if (d.sick) {
-          statusLine  = 'Sick day';
-          borderStyle = 'border-color:rgba(248,113,113,.3);background:var(--red-soft)';
-        } else if (d.leave) {
-          statusLine  = d.leave.type;
-          borderStyle = 'border-color:rgba(62,207,142,.2);background:var(--green-soft)';
-        } else if (d.shift) {
-          statusLine = `${d.shift.start} – ${d.shift.end}`;
-          metaLine   = `${shiftHours(d.shift).toFixed(1)} hrs · ${d.shift.breakMin || 0}m break`;
-        }
-        if (d.isToday) borderStyle += ';border-color:var(--gold);border-width:2px';
-
-        return `<div class="card list-card" style="${borderStyle}">
+      ${days.map(d=>{
+        const dObj=new Date(d.ds+'T00:00:00');
+        const dow=dObj.toLocaleDateString('en-AU',{weekday:'short'}).toUpperCase();
+        const num=dObj.getDate();
+        let label='Off', meta='', bdr='', bg='';
+        if (d.sick)  { label='Sick day'; bdr='rgba(163,45,45,.3)'; bg='rgba(163,45,45,.04)'; }
+        else if (d.leave) { label=d.leave.type; bdr='rgba(15,110,86,.2)'; bg='rgba(15,110,86,.04)'; }
+        else if (d.shift) { label=`${d.shift.start}–${d.shift.end}`; meta=`${shiftHrs(d.shift).toFixed(1)} hrs · ${d.shift.breakMin||0}m break`; }
+        if (d.isToday) bdr='#534AB7';
+        return `<div class="card list-card" style="${bdr?`border-color:${bdr};`:''}${bg?`background:${bg};`:''}${d.isToday?'border-width:2px;':''}" >
           <div style="display:flex;gap:14px;align-items:flex-start;width:100%">
             <div style="min-width:44px;text-align:center;flex-shrink:0">
-              <div style="font-size:.65rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--text-3)">${esc(dow)}</div>
-              <div style="font-family:'DM Serif Display',Georgia,serif;font-size:1.8rem;color:${d.isToday ? 'var(--gold)' : 'var(--text)'};line-height:1;margin-top:3px">${num}</div>
+              <div style="font-size:.62rem;font-weight:700;letter-spacing:.07em;color:#98988f">${esc(dow)}</div>
+              <div style="font-family:'DM Serif Display',Georgia,serif;font-size:1.8rem;line-height:1;margin-top:2px;color:${d.isToday?'#534AB7':'#181816'}">${num}</div>
             </div>
             <div style="flex:1">
-              <div class="list-title">${esc(statusLine)}</div>
-              ${metaLine ? `<div class="list-copy">${esc(metaLine)}</div>` : ''}
-              ${d.shift && d.isToday ? `<button class="btn btn-secondary btn-sm" style="margin-top:8px;font-size:.78rem" onclick="openRunningLate()">⏱ Running late?</button>` : ''}
+              <div class="list-title">${esc(label)}</div>
+              ${meta?`<div class="list-copy">${esc(meta)}</div>`:''}
+              ${d.shift&&d.isToday?`<button class="btn btn-secondary btn-sm" style="margin-top:8px;font-size:.78rem" onclick="openLate()">⏱ Running late?</button>`:''}
             </div>
           </div>
         </div>`;
       }).join('')}
     </div>
-    <div id="running-late-form"></div>
-  `;
+    <div id="late-wrap"></div>`;
 }
 
-window.rosterNav = function(dirOrReset) {
-  if (dirOrReset === 0) { state.currentWeekOffset = 0; }
-  else { state.currentWeekOffset += dirOrReset; }
-  renderRoster();
-};
+window.rNav = function(d) { state.weekOffset+=d; renderRoster(); };
 
-window.openRunningLate = function() {
-  const c = qs('#running-late-form'); if (!c) return;
-  c.innerHTML = `
-    <div class="card" style="margin-top:14px;border-color:rgba(251,191,36,.25);background:var(--amber-soft)">
-      <div style="font-size:.72rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--amber);margin-bottom:14px">⏱ Running late</div>
+window.openLate = function() {
+  const c=qs('#late-wrap'); if(!c) return;
+  c.innerHTML=`
+    <div class="card" style="margin-top:14px;border-color:rgba(186,117,23,.3);background:rgba(186,117,23,.05)">
+      <div style="font-weight:700;color:#BA7517;margin-bottom:14px">⏱ Running late</div>
       <div class="form-grid">
-        <div class="input-wrap">
-          <label>Reason *</label>
-          <textarea class="textarea" id="late-reason" rows="2" placeholder="e.g. Traffic, transport delay..." style="min-height:70px"></textarea>
-        </div>
-        <div class="input-wrap">
-          <label>Estimated arrival *</label>
-          <input class="input" type="time" id="late-eta">
-        </div>
-        <div style="display:flex;align-items:center;gap:10px;padding:12px;background:var(--surface-2);border-radius:var(--r-sm);border:1px solid var(--border)">
-          <input type="checkbox" id="late-contacted" style="width:18px;height:18px;cursor:pointer;accent-color:var(--gold)">
-          <label for="late-contacted" style="font-size:.88rem;font-weight:600;cursor:pointer">I have contacted my manager</label>
-        </div>
-        <div id="late-err" style="display:none;color:var(--red);font-size:.82rem">⚠ Please provide a reason and arrival time.</div>
+        <div class="input-wrap"><label>Reason *</label><textarea class="textarea" id="late-r" rows="2" placeholder="e.g. Traffic, transport delay..." style="min-height:64px"></textarea></div>
+        <div class="input-wrap"><label>Estimated arrival *</label><input class="input" type="time" id="late-eta"></div>
+        <label style="display:flex;align-items:center;gap:10px;font-size:.9rem;font-weight:600;cursor:pointer;padding:10px;background:var(--surface-2);border-radius:var(--r-sm)">
+          <input type="checkbox" id="late-c" style="width:18px;height:18px;accent-color:#534AB7"> I have contacted my manager
+        </label>
+        <div id="late-err" style="display:none;color:#A32D2D;font-size:.82rem">⚠ Please fill in reason and arrival time.</div>
         <div class="btn-row full-span">
-          <button class="btn btn-secondary" onclick="qs('#running-late-form').innerHTML=''">Cancel</button>
-          <button class="btn btn-primary" onclick="submitRunningLate()">Notify manager</button>
+          <button class="btn btn-secondary" onclick="qs('#late-wrap').innerHTML=''">Cancel</button>
+          <button class="btn btn-primary" onclick="submitLate()" style="background:#BA7517">Notify manager</button>
         </div>
       </div>
-    </div>
-  `;
+    </div>`;
 };
 
-window.submitRunningLate = async function() {
-  const reason    = (qs('#late-reason')?.value || '').trim();
-  const eta       = (qs('#late-eta')?.value || '').trim();
-  const contacted = qs('#late-contacted')?.checked || false;
-  const errEl     = qs('#late-err');
-  if (!reason || !eta) { if (errEl) errEl.style.display = 'block'; return; }
-  if (errEl) errEl.style.display = 'none';
-  const todayStr   = today();
-  const shifts     = getList('shifts').filter(s => s.empId === state.emp.id && s.published);
-  const todayShift = shifts.find(s => s.date === todayStr);
-  if (!todayShift) return;
+window.submitLate = async function() {
+  const reason=qs('#late-r')?.value.trim(), eta=qs('#late-eta')?.value.trim(), contacted=qs('#late-c')?.checked||false;
+  const errEl=qs('#late-err');
+  if (!reason||!eta){ if(errEl) errEl.style.display='block'; return; }
+  if (errEl) errEl.style.display='none';
+  const td=today(), shift=getList('shifts').find(s=>s.empId===state.emp.id&&s.date===td&&s.published);
+  if (!shift) return;
   try {
-    await gasPost({
-      action: 'sendEmail', fn: 'sendRunningLateNotification',
-      payload: { empId: state.emp.id, date: todayStr, shiftStart: todayShift.start, shiftEnd: todayShift.end, reason, eta, contacted }
-    });
-    const c = qs('#running-late-form');
-    if (c) c.innerHTML = `<div class="card" style="margin-top:14px;border-color:rgba(62,207,142,.25);background:var(--green-soft)"><div style="font-weight:700;color:var(--green)">✓ Your manager has been notified.</div></div>`;
-    toast('Manager notified.', 'success');
-  } catch(e) { toast('Could not send — please contact your manager directly.', 'error'); }
+    await gasPost({action:'sendEmail',fn:'sendRunningLateNotification',
+      payload:{empId:state.emp.id,date:td,shiftStart:shift.start,shiftEnd:shift.end,reason,eta,contacted}});
+    const c=qs('#late-wrap');
+    if(c) c.innerHTML=`<div class="card" style="margin-top:14px;border-color:rgba(15,110,86,.2);background:rgba(15,110,86,.06)"><span style="font-weight:600;color:#0F6E56">✓ Your manager has been notified.</span></div>`;
+    toast('Manager notified.','success');
+  } catch(e){ toast('Could not send — contact your manager directly.','error'); }
 };
 
-// ── LEAVE ─────────────────────────────────────────────────────
+// ── LEAVE ──────────────────────────────────────────────────────
 function renderLeave() {
-  const emp       = state.emp;
-  const leaveReqs = getList('leaveRequests').filter(l => l.empId === emp.id).sort((a,b) => (b.submitted||b.from||'').localeCompare(a.submitted||a.from||''));
-  const sickDays  = getList('sickDays').filter(s => s.empId === emp.id).sort((a,b) => b.date.localeCompare(a.date));
-  const medCerts  = getList('medCerts').filter(m => m.empId === emp.id);
-  const pending   = leaveReqs.filter(l => l.status === 'pending');
-  const history   = leaveReqs.filter(l => l.status !== 'pending');
+  const emp    = state.emp;
+  const reqs   = getList('leaveRequests').filter(l=>l.empId===emp.id).sort((a,b)=>(b.submitted||b.from||'').localeCompare(a.submitted||a.from||''));
+  const sick   = getList('sickDays').filter(s=>s.empId===emp.id).sort((a,b)=>b.date.localeCompare(a.date));
+  const mcs    = getList('medCerts').filter(m=>m.empId===emp.id);
+  const pending= reqs.filter(l=>l.status==='pending');
+  const hist   = reqs.filter(l=>l.status!=='pending');
 
-  const badgeStyle = {
-    pending:  'background:var(--amber-soft);color:var(--amber)',
-    approved: 'background:var(--green-soft);color:var(--green)',
-    declined: 'background:var(--red-soft);color:var(--red)',
+  const badge = s => {
+    if (s==='approved') return `<span class="badge badge-green">approved</span>`;
+    if (s==='declined') return `<span class="badge badge-red">declined</span>`;
+    return `<span class="badge badge-amber">pending</span>`;
   };
 
-  qs('#view-leave').innerHTML = `
+  qs('#view-leave').innerHTML=`
     <div class="page-header">
       <div><h1 class="page-title">Leave</h1></div>
-      <button class="btn btn-primary btn-sm" onclick="openLeaveForm()">+ Request</button>
+      <button class="btn btn-primary" onclick="openLeaveForm()">+ Request leave</button>
     </div>
-    <div id="leave-form-container"></div>
-
-    <div class="section-label">Pending</div>
-    ${pending.length ? pending.map(l => `
-      <div class="card list-card">
-        <div>
-          <div class="list-title">${esc(l.type)}</div>
-          <div class="list-copy">${esc(FDS(l.from))} – ${esc(FDS(l.to))}</div>
-        </div>
-        <span class="badge" style="${badgeStyle.pending}">Pending</span>
-      </div>
-    `).join('') : '<div class="helper-note">No pending requests.</div>'}
-
+    <div id="lv-form"></div>
+    <div class="section-label">Pending requests</div>
+    ${pending.length?pending.map(l=>`
+      <div class="card list-card" style="margin-bottom:0">
+        <div><div class="list-title">${esc(l.type)}</div><div class="list-copy">${esc(FDS(l.from))} – ${esc(FDS(l.to))}</div></div>
+        ${badge(l.status)}
+      </div>`).join(''):'<div class="helper-note">No pending requests.</div>'}
     <div class="section-label">History</div>
     <div class="info-grid">
-      ${history.length ? history.map(l => {
-        const st = l.status || 'pending';
-        const bs = badgeStyle[st] || badgeStyle.pending;
-        return `<div class="card list-card">
+      ${hist.length?hist.map(l=>`
+        <div class="card list-card">
           <div>
             <div class="list-title">${esc(l.type)}</div>
             <div class="list-copy">${esc(FDS(l.from))} – ${esc(FDS(l.to))}</div>
-            ${l.denialReason ? `<div class="list-copy" style="color:var(--red);margin-top:4px;font-size:.78rem">Reason: ${esc(l.denialReason)}</div>` : ''}
+            ${l.denialReason?`<div class="list-copy" style="color:#A32D2D;font-size:.78rem;margin-top:3px">Reason: ${esc(l.denialReason)}</div>`:''}
           </div>
-          <span class="badge" style="${bs}">${esc(st)}</span>
-        </div>`;
-      }).join('') : '<div class="helper-note">No leave history.</div>'}
+          ${badge(l.status)}
+        </div>`).join(''):'<div class="helper-note">No leave history.</div>'}
     </div>
-
-    <div class="section-label">Sick days &amp; certificates</div>
+    <div class="section-label">Sick days &amp; medical certificates</div>
     <div class="info-grid">
-      ${sickDays.length ? sickDays.map(sk => {
-        const mc = medCerts.find(m => m.sickId === sk.id || m.date === sk.date);
+      ${sick.length?sick.map(sk=>{
+        const mc=mcs.find(m=>m.sickId===sk.id||m.date===sk.date);
         return `<div class="card list-card">
           <div>
             <div class="list-title">Sick day — ${esc(FDS(sk.date))}</div>
-            ${mc
-              ? `<div class="list-copy" style="color:var(--green);font-size:.78rem">✓ MC uploaded ${esc(new Date(mc.uploadedAt).toLocaleDateString('en-AU'))}</div>`
-              : `<div class="list-copy" style="color:var(--amber);font-size:.78rem">⚠ Medical certificate required</div>`
-            }
+            ${mc?`<div class="list-copy" style="color:#0F6E56;font-size:.78rem">✓ Uploaded ${esc(new Date(mc.uploadedAt).toLocaleDateString('en-AU'))}</div>`
+                :`<div class="list-copy" style="color:#BA7517;font-size:.78rem">⚠ Medical certificate required</div>`}
           </div>
-          ${mc
-            ? `<span class="badge" style="background:var(--green-soft);color:var(--green)">Uploaded</span>`
-            : `<button class="btn btn-secondary btn-sm" onclick="openMCUpload('${esc(sk.id)}','${esc(sk.date)}')">Upload MC</button>`
-          }
-        </div>`;
-      }).join('') : '<div class="helper-note">No sick days recorded.</div>'}
+          ${mc?`<span class="badge badge-green">MC uploaded</span>`
+              :`<button class="btn btn-secondary btn-sm" onclick="openMC('${esc(sk.id)}','${esc(sk.date)}')">Upload MC</button>`}
+        </div>`;}).join(''):'<div class="helper-note">No sick days recorded.</div>'}
     </div>
-    <div id="mc-upload-container"></div>
-  `;
+    <div id="mc-wrap"></div>`;
 }
 
 window.openLeaveForm = function() {
-  const c = qs('#leave-form-container'); if (!c) return;
-  c.innerHTML = `
+  const c=qs('#lv-form'); if(!c) return;
+  c.innerHTML=`
     <div class="card" style="margin-bottom:14px">
       <div style="font-family:'DM Serif Display',Georgia,serif;font-size:1.3rem;margin-bottom:16px">New leave request</div>
       <div class="form-grid">
-        <div class="input-wrap">
-          <label>Leave type</label>
-          <select class="select" id="lv-type">
-            <option>Annual Leave</option><option>Sick Leave</option><option>Personal Leave</option>
-            <option>Carers Leave</option><option>Unpaid Leave</option>
-          </select>
+        <div class="input-wrap"><label>Leave type</label>
+          <select class="select" id="lv-t"><option>Annual Leave</option><option>Sick Leave</option><option>Personal Leave</option><option>Carers Leave</option><option>Unpaid Leave</option></select>
         </div>
-        <div class="input-wrap"><label>From</label><input class="input" id="lv-from" type="date"></div>
+        <div class="input-wrap"><label>From</label><input class="input" id="lv-f" type="date"></div>
         <div class="input-wrap"><label>To</label><input class="input" id="lv-to" type="date"></div>
-        <div class="input-wrap full-span"><label>Notes</label><textarea class="textarea" id="lv-notes" placeholder="Optional context..."></textarea></div>
-        <div id="lv-err" style="display:none;color:var(--red);font-size:.82rem" class="full-span">⚠ Please enter valid dates.</div>
+        <div class="input-wrap full-span"><label>Notes (optional)</label><textarea class="textarea" id="lv-n" placeholder="Any additional context..."></textarea></div>
+        <div id="lv-err" style="display:none;color:#A32D2D;font-size:.82rem" class="full-span">⚠ Please enter valid from and to dates.</div>
         <div class="btn-row full-span">
-          <button class="btn btn-secondary" onclick="qs('#leave-form-container').innerHTML=''">Cancel</button>
-          <button class="btn btn-primary" onclick="submitLeave()">Submit</button>
+          <button class="btn btn-secondary" onclick="qs('#lv-form').innerHTML=''">Cancel</button>
+          <button class="btn btn-primary" onclick="submitLeave()">Submit request</button>
         </div>
       </div>
-    </div>
-  `;
+    </div>`;
 };
 
 window.submitLeave = async function() {
-  const type  = qs('#lv-type')?.value;
-  const from  = qs('#lv-from')?.value;
-  const to    = qs('#lv-to')?.value;
-  const notes = (qs('#lv-notes')?.value || '').trim();
-  const errEl = qs('#lv-err');
-  if (!from || !to || from > to) { if (errEl) { errEl.style.display = 'block'; } return; }
-  if (errEl) errEl.style.display = 'none';
-  const leaves   = getList('leaveRequests');
-  const newLeave = { id: 'lr' + Date.now(), empId: state.emp.id, type, from, to, notes, status: 'pending', submitted: new Date().toISOString() };
-  leaves.push(newLeave);
+  const type=qs('#lv-t')?.value, from=qs('#lv-f')?.value, to=qs('#lv-to')?.value, notes=(qs('#lv-n')?.value||'').trim();
+  const errEl=qs('#lv-err');
+  if (!from||!to||from>to){ if(errEl) errEl.style.display='block'; return; }
+  if (errEl) errEl.style.display='none';
+  const reqs=getList('leaveRequests');
+  reqs.push({id:'lr'+Date.now(),empId:state.emp.id,type,from,to,notes,status:'pending',submitted:new Date().toISOString()});
   try {
-    await saveList('leaveRequests', leaves);
-    await gasPost({ action: 'sendEmail', fn: 'sendLeaveRequestNotification', payload: { empId: state.emp.id, type, from, to, notes, reason: notes } });
-    if (qs('#leave-form-container')) qs('#leave-form-container').innerHTML = '';
-    renderLeave();
-    toast('Leave request submitted! ✓', 'success');
-  } catch(e) { toast('Could not submit — please try again.', 'error'); }
+    await saveList('leaveRequests',reqs);
+    await gasPost({action:'sendEmail',fn:'sendLeaveRequestNotification',payload:{empId:state.emp.id,type,from,to,notes,reason:notes}});
+    if(qs('#lv-form')) qs('#lv-form').innerHTML='';
+    renderLeave(); toast('Leave request submitted! ✓','success');
+  } catch(e){ toast('Could not submit — please try again.','error'); }
 };
 
-// ── MC UPLOAD ─────────────────────────────────────────────────
-let _mcSickId = null, _mcDate = null, _mcFileData = null;
+// ── MC UPLOAD ──────────────────────────────────────────────────
+let _mcS=null, _mcD=null, _mcF=null;
 
-window.openMCUpload = function(sickId, date) {
-  _mcSickId = sickId; _mcDate = date; _mcFileData = null;
-  const c = qs('#mc-upload-container'); if (!c) return;
-  c.innerHTML = `
+window.openMC = function(sickId,date) {
+  _mcS=sickId; _mcD=date; _mcF=null;
+  const c=qs('#mc-wrap'); if(!c) return;
+  c.innerHTML=`
     <div class="card" style="margin-top:12px">
       <div style="font-family:'DM Serif Display',Georgia,serif;font-size:1.2rem;margin-bottom:4px">Upload certificate</div>
       <div class="list-copy" style="margin-bottom:16px">For sick day: ${esc(FDS(date))}</div>
-      <div id="mc-drop" style="border:2px dashed var(--border-2);border-radius:var(--r-md);padding:24px;text-align:center;margin-bottom:14px;cursor:pointer;transition:border-color .2s" onclick="qs('#mc-file-input').click()">
-        <div style="font-size:28px;margin-bottom:8px">📎</div>
-        <div style="font-size:.88rem;font-weight:600;color:var(--text-2)">Tap to select file</div>
-        <div style="font-size:.75rem;color:var(--text-3);margin-top:4px">JPG or PNG · PDF accepted</div>
+      <div id="mc-drop" style="border:2px dashed rgba(24,24,22,.15);border-radius:var(--r-md);padding:24px;text-align:center;cursor:pointer;margin-bottom:14px" onclick="qs('#mc-fi').click()">
+        <div style="font-size:26px;margin-bottom:6px">📎</div>
+        <div style="font-size:.88rem;font-weight:600;color:#58584e">Tap to select file</div>
+        <div style="font-size:.75rem;color:#98988f;margin-top:3px">JPG or PNG recommended · PDF accepted</div>
       </div>
-      <input type="file" id="mc-file-input" accept=".pdf,.jpg,.jpeg,.png" style="display:none" onchange="handleMCFile(event)">
-      <div id="mc-status" style="display:none;font-size:.82rem;margin-bottom:12px"></div>
-      <div id="mc-err" style="display:none;color:var(--red);font-size:.82rem;margin-bottom:10px"></div>
+      <input type="file" id="mc-fi" accept=".pdf,.jpg,.jpeg,.png" style="display:none" onchange="handleMC(event)">
+      <div id="mc-st" style="display:none;font-size:.82rem;margin-bottom:12px"></div>
+      <div id="mc-err" style="display:none;color:#A32D2D;font-size:.82rem;margin-bottom:10px">⚠ Please select a file first.</div>
       <div class="btn-row">
-        <button class="btn btn-secondary" style="flex:1" onclick="qs('#mc-upload-container').innerHTML=''">Cancel</button>
-        <button class="btn btn-primary" style="flex:1" onclick="submitMC()">Upload</button>
+        <button class="btn btn-secondary" style="flex:1" onclick="qs('#mc-wrap').innerHTML=''">Cancel</button>
+        <button class="btn btn-primary" style="flex:1" onclick="submitMC()">Upload certificate</button>
       </div>
-    </div>
-  `;
+    </div>`;
 };
 
-window.handleMCFile = function(e) {
-  const file = e.target.files[0]; if (!file) return;
-  const status = qs('#mc-status');
-  if (status) { status.style.display = 'block'; status.style.color = 'var(--text-2)'; status.textContent = '⏳ Processing…'; }
+window.handleMC = function(e) {
+  const file=e.target.files[0]; if(!file) return;
+  const st=qs('#mc-st'); if(st){st.style.display='block';st.style.color='#98988f';st.textContent='⏳ Processing...';}
   if (file.type.startsWith('image/')) {
-    const reader = new FileReader();
-    reader.onload = ev => {
-      const img = new Image();
-      img.onload = () => {
-        const MAX = 1400; let w = img.width, h = img.height;
-        if (w > MAX || h > MAX) { if (w > h) { h = Math.round(h*MAX/w); w = MAX; } else { w = Math.round(w*MAX/h); h = MAX; } }
-        const canvas = document.createElement('canvas'); canvas.width = w; canvas.height = h;
-        canvas.getContext('2d').drawImage(img, 0, 0, w, h);
-        const compressed = canvas.toDataURL('image/jpeg', 0.75);
-        const kb = Math.round(compressed.length * 0.75 / 1024);
-        _mcFileData = { data: compressed, name: file.name.replace(/\.[^.]+$/, '.jpg'), type: 'image/jpeg' };
-        if (status) { status.style.color = 'var(--green)'; status.textContent = `✓ ${file.name} ready (${kb}KB)`; }
-        const drop = qs('#mc-drop'); if (drop) drop.style.borderColor = 'var(--green)';
-      };
-      img.src = ev.target.result;
-    };
-    reader.readAsDataURL(file);
+    const r=new FileReader(); r.onload=ev=>{
+      const img=new Image(); img.onload=()=>{
+        const MAX=1400; let w=img.width,h=img.height;
+        if(w>MAX||h>MAX){if(w>h){h=Math.round(h*MAX/w);w=MAX;}else{w=Math.round(w*MAX/h);h=MAX;}}
+        const cv=document.createElement('canvas'); cv.width=w;cv.height=h;
+        cv.getContext('2d').drawImage(img,0,0,w,h);
+        const data=cv.toDataURL('image/jpeg',0.75);
+        const kb=Math.round(data.length*.75/1024);
+        _mcF={data,name:file.name.replace(/\.[^.]+$/,'.jpg'),type:'image/jpeg'};
+        if(st){st.style.color='#0F6E56';st.textContent=`✓ ${file.name} ready (${kb}KB compressed)`;}
+        const drop=qs('#mc-drop'); if(drop) drop.style.borderColor='#0F6E56';
+      }; img.src=ev.target.result;
+    }; r.readAsDataURL(file);
   } else {
-    const reader = new FileReader();
-    reader.onload = ev => {
-      const kb = Math.round(ev.target.result.length * 0.75 / 1024);
-      _mcFileData = { data: ev.target.result, name: file.name, type: file.type };
-      if (status) { status.style.color = kb > 1500 ? 'var(--amber)' : 'var(--green)'; status.textContent = `✓ ${file.name} (${kb}KB)`; }
-    };
-    reader.readAsDataURL(file);
+    const r=new FileReader(); r.onload=ev=>{
+      const kb=Math.round(ev.target.result.length*.75/1024);
+      _mcF={data:ev.target.result,name:file.name,type:file.type};
+      if(st){st.style.color=kb>1500?'#BA7517':'#0F6E56';st.textContent=`✓ ${file.name} (${kb}KB)`;}
+    }; r.readAsDataURL(file);
   }
 };
 
 window.submitMC = async function() {
-  const errEl = qs('#mc-err');
-  if (!_mcFileData) { if (errEl) { errEl.style.display = 'block'; errEl.textContent = '⚠ Please select a file first.'; } return; }
-  const mcId = 'mc' + Date.now();
-  const { data: capturedData, name: capturedName, type: capturedType } = _mcFileData;
-  const mcs = getList('medCerts');
-  mcs.push({ id: mcId, empId: state.emp.id, date: _mcDate, sickId: _mcSickId, fileName: capturedName, fileType: capturedType, uploadedAt: new Date().toISOString(), managerNotified: false });
-  await saveList('medCerts', mcs);
-  if (qs('#mc-upload-container')) qs('#mc-upload-container').innerHTML = '';
-  _mcFileData = null; renderLeave();
-  const kb = Math.round(capturedData.length * 0.75 / 1024);
-  toast(`Uploading certificate (${kb}KB)…`, 'info', 15000);
+  const errEl=qs('#mc-err');
+  if(!_mcF){if(errEl)errEl.style.display='block';return;}
+  const mcId='mc'+Date.now(), {data,name,type}=_mcF;
+  const mcs=getList('medCerts');
+  mcs.push({id:mcId,empId:state.emp.id,date:_mcD,sickId:_mcS,fileName:name,fileType:type,uploadedAt:new Date().toISOString(),managerNotified:false});
+  await saveList('medCerts',mcs);
+  if(qs('#mc-wrap')) qs('#mc-wrap').innerHTML='';
+  _mcF=null; renderLeave();
+  toast(`Uploading certificate...`,'info',15000);
   try {
-    const result = await gasPost({ action: 'uploadMC', mcId, fileName: capturedName, fileType: capturedType, data: capturedData });
-    if (result?.result?.ok) {
-      toast('Certificate uploaded! ✓', 'success');
-      await gasPost({ action: 'sendEmail', fn: 'sendMCUploadNotification', payload: { empId: state.emp.id, date: _mcDate, fileName: capturedName } });
-    } else {
-      toast('Upload error — try a JPG photo of the certificate.', 'error');
-    }
-  } catch(e) { toast('Upload failed — please try again.', 'error'); }
+    const r=await gasPost({action:'uploadMC',mcId,fileName:name,fileType:type,data});
+    if(r?.result?.ok){
+      toast('Certificate uploaded! ✓','success');
+      await gasPost({action:'sendEmail',fn:'sendMCUploadNotification',payload:{empId:state.emp.id,date:_mcD,fileName:name}});
+    } else { toast('Upload error — try a JPG photo.','error'); }
+  } catch(e){ toast('Upload failed — please try again.','error'); }
 };
 
-// ── OT ────────────────────────────────────────────────────────
+// ── OT ─────────────────────────────────────────────────────────
 function renderOT() {
-  const emp    = state.emp;
-  const otReqs = getList('otRequests').filter(o => o.empId === emp.id).sort((a,b) => b.date.localeCompare(a.date));
-
+  const emp  = state.emp;
+  const reqs = getList('otRequests').filter(o=>o.empId===emp.id).sort((a,b)=>b.date.localeCompare(a.date));
   const badge = o => {
-    if (o.approved === true)  return `<span class="badge" style="background:var(--green-soft);color:var(--green)">Approved</span>`;
-    if (o.approved === false) return `<span class="badge" style="background:var(--red-soft);color:var(--red)">Denied</span>`;
-    return `<span class="badge" style="background:var(--amber-soft);color:var(--amber)">Pending</span>`;
+    if(o.approved===true)  return `<span class="badge badge-green">Approved</span>`;
+    if(o.approved===false) return `<span class="badge badge-red">Denied</span>`;
+    return `<span class="badge badge-amber">Pending</span>`;
   };
-
-  qs('#view-ot').innerHTML = `
+  qs('#view-ot').innerHTML=`
     <div class="page-header">
-      <div>
-        <h1 class="page-title">Overtime</h1>
-        <div class="page-subtitle">Your OT requests.</div>
-      </div>
-      <button class="btn btn-primary btn-sm" onclick="openOTForm()">+ Request</button>
+      <div><h1 class="page-title">Overtime</h1><div class="page-subtitle">Submit and review overtime requests.</div></div>
+      <button class="btn btn-primary" onclick="openOTForm()">+ Request OT</button>
     </div>
-    <div id="ot-form-container"></div>
+    <div id="ot-form"></div>
     <div class="info-grid">
-      ${otReqs.length ? otReqs.map(o => `
+      ${reqs.length?reqs.map(o=>`
         <div class="card list-card">
           <div>
-            <div class="list-title">${esc(FDS(o.date))} — ${esc(o.start)} – ${esc(o.end)}</div>
-            ${o.reason ? `<div class="list-copy">${esc(o.reason)}</div>` : ''}
+            <div class="list-title">${esc(FDOW(o.date))} ${esc(FDS(o.date))}</div>
+            <div class="list-copy">${esc(o.start)} – ${esc(o.end)}</div>
           </div>
           ${badge(o)}
-        </div>
-      `).join('') : '<div class="helper-note">No OT requests yet.</div>'}
-    </div>
-  `;
+        </div>`).join(''):'<div class="helper-note">No OT requests yet.</div>'}
+    </div>`;
 }
 
 window.openOTForm = function() {
-  const c = qs('#ot-form-container'); if (!c) return;
-  c.innerHTML = `
+  const c=qs('#ot-form'); if(!c) return;
+  c.innerHTML=`
     <div class="card" style="margin-bottom:14px">
-      <div style="font-family:'DM Serif Display',Georgia,serif;font-size:1.3rem;margin-bottom:16px">New OT request</div>
+      <div style="font-family:'DM Serif Display',Georgia,serif;font-size:1.3rem;margin-bottom:16px">New overtime request</div>
       <div class="form-grid">
-        <div class="input-wrap"><label>Date</label><input class="input" id="ot-date" type="date"></div>
-        <div class="input-wrap"><label>From</label><input class="input" id="ot-start" type="time"></div>
-        <div class="input-wrap"><label>To</label><input class="input" id="ot-end" type="time"></div>
-        <div class="input-wrap full-span"><label>Reason</label><textarea class="textarea" id="ot-reason" placeholder="Why is OT needed?"></textarea></div>
-        <div id="ot-err" style="display:none;color:var(--red);font-size:.82rem" class="full-span">⚠ Please fill in all required fields.</div>
+        <div class="input-wrap"><label>Date</label><input class="input" id="ot-d" type="date"></div>
+        <div class="input-wrap"><label>From</label><input class="input" id="ot-s" type="time"></div>
+        <div class="input-wrap"><label>To</label><input class="input" id="ot-e" type="time"></div>
+        <div class="input-wrap full-span"><label>Reason</label><textarea class="textarea" id="ot-r" placeholder="Why is OT needed?"></textarea></div>
+        <div id="ot-err" style="display:none;color:#A32D2D;font-size:.82rem" class="full-span">⚠ Please fill in date and times.</div>
         <div class="btn-row full-span">
-          <button class="btn btn-secondary" onclick="qs('#ot-form-container').innerHTML=''">Cancel</button>
+          <button class="btn btn-secondary" onclick="qs('#ot-form').innerHTML=''">Cancel</button>
           <button class="btn btn-primary" onclick="submitOT()">Submit</button>
         </div>
       </div>
-    </div>
-  `;
+    </div>`;
 };
 
 window.submitOT = async function() {
-  const date   = qs('#ot-date')?.value;
-  const start  = qs('#ot-start')?.value;
-  const end    = qs('#ot-end')?.value;
-  const reason = (qs('#ot-reason')?.value || '').trim();
-  const errEl  = qs('#ot-err');
-  if (!date || !start || !end) { if (errEl) errEl.style.display = 'block'; return; }
-  if (errEl) errEl.style.display = 'none';
-  const otReqs = getList('otRequests');
-  const newOT  = { id: 'ot' + Date.now(), empId: state.emp.id, date, start, end, reason, approved: null, requestedBy: 'staff', submitted: new Date().toISOString() };
-  otReqs.push(newOT);
-  try {
-    await saveList('otRequests', otReqs);
-    await gasPost({ action: 'sendEmail', fn: 'sendOTRequestNotification', payload: { empId: state.emp.id, date, start, end, reason } });
-    if (qs('#ot-form-container')) qs('#ot-form-container').innerHTML = '';
-    renderOT();
-    toast('OT request submitted! ✓', 'success');
-  } catch(e) { toast('Could not submit — please try again.', 'error'); }
+  const date=qs('#ot-d')?.value, start=qs('#ot-s')?.value, end=qs('#ot-e')?.value, reason=(qs('#ot-r')?.value||'').trim();
+  const errEl=qs('#ot-err');
+  if(!date||!start||!end){if(errEl)errEl.style.display='block';return;}
+  if(errEl)errEl.style.display='none';
+  const reqs=getList('otRequests');
+  reqs.push({id:'ot'+Date.now(),empId:state.emp.id,date,start,end,reason,approved:null,requestedBy:'staff',submitted:new Date().toISOString()});
+  try{
+    await saveList('otRequests',reqs);
+    await gasPost({action:'sendEmail',fn:'sendOTRequestNotification',payload:{empId:state.emp.id,date,start,end,reason}});
+    if(qs('#ot-form')) qs('#ot-form').innerHTML='';
+    renderOT(); toast('OT request submitted! ✓','success');
+  }catch(e){toast('Could not submit — please try again.','error');}
 };
 
-// ── HOURS ─────────────────────────────────────────────────────
+// ── HOURS ──────────────────────────────────────────────────────
 function renderHours() {
   const emp    = state.emp;
-  const shifts = getList('shifts').filter(s => s.empId === emp.id && s.published);
-  const today  = new Date(); today.setHours(0,0,0,0);
-  const todayStr = today.toISOString().split('T')[0];
-  const ws  = weekStartDate(0);
-  const we  = addDays(ws, 6);
-  const ms  = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-01`;
-  const me  = new Date(today.getFullYear(), today.getMonth()+1, 0).toISOString().split('T')[0];
+  const shifts = getList('shifts').filter(s=>s.empId===emp.id&&s.published);
+  const td     = today();
+  const ws     = weekStart(0), we=addDays(ws,6);
+  const now    = new Date();
+  const ms     = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-01`;
+  const me     = new Date(now.getFullYear(),now.getMonth()+1,0).toISOString().split('T')[0];
 
-  const weekHrs   = shifts.filter(s => s.date >= ws && s.date <= we).reduce((t,s) => t + shiftHours(s), 0);
-  const monthHrs  = shifts.filter(s => s.date >= ms && s.date <= me).reduce((t,s) => t + shiftHours(s), 0);
-  const futureHrs = shifts.filter(s => s.date > todayStr).reduce((t,s) => t + shiftHours(s), 0);
-  const recent    = shifts.filter(s => s.date <= todayStr).sort((a,b) => b.date.localeCompare(a.date)).slice(0, 8);
+  const wkH  = shifts.filter(s=>s.date>=ws&&s.date<=we).reduce((t,s)=>t+shiftHrs(s),0);
+  const moH  = shifts.filter(s=>s.date>=ms&&s.date<=me).reduce((t,s)=>t+shiftHrs(s),0);
+  const futH = shifts.filter(s=>s.date>td).reduce((t,s)=>t+shiftHrs(s),0);
+  const rec  = shifts.filter(s=>s.date<=td).sort((a,b)=>b.date.localeCompare(a.date)).slice(0,8);
 
-  qs('#view-hours').innerHTML = `
+  qs('#view-hours').innerHTML=`
     <div class="page-header stack">
       <h1 class="page-title">Hours</h1>
-      <div class="page-subtitle">Your rostered hours summary.</div>
+      <div class="page-subtitle">A summary of your rostered hours.</div>
     </div>
     <div class="kpis">
-      <div class="kpi"><div class="kpi-label">This week</div><div class="kpi-value">${weekHrs.toFixed(1)}h</div></div>
-      <div class="kpi"><div class="kpi-label">This month</div><div class="kpi-value">${monthHrs.toFixed(1)}h</div></div>
-      <div class="kpi"><div class="kpi-label">Upcoming</div><div class="kpi-value">${futureHrs.toFixed(1)}h</div></div>
-      <div class="kpi"><div class="kpi-label">Live sync</div><div class="kpi-value" style="font-size:1.2rem;color:var(--green)">✓</div></div>
+      <div class="kpi"><div class="kpi-label">This week</div><div class="kpi-value">${wkH.toFixed(1)}h</div></div>
+      <div class="kpi"><div class="kpi-label">This month</div><div class="kpi-value">${moH.toFixed(1)}h</div></div>
+      <div class="kpi"><div class="kpi-label">Upcoming</div><div class="kpi-value">${futH.toFixed(1)}h</div></div>
+      <div class="kpi"><div class="kpi-label">Status</div><div class="kpi-value" style="font-size:1rem;color:#0F6E56">Live ✓</div></div>
     </div>
     <div class="section-label">Recent shifts</div>
     <div class="info-grid">
-      ${recent.length ? recent.map(s => `
+      ${rec.length?rec.map(s=>`
         <div class="card list-card">
           <div>
-            <div class="list-title">${esc(FDS(s.date))} <span style="font-weight:400;color:var(--text-2)">${esc(FDOW(s.date))}</span></div>
+            <div class="list-title">${esc(FDS(s.date))} <span style="font-weight:400;color:#58584e">${esc(FDOW(s.date))}</span></div>
             <div class="list-copy">${esc(s.start)} – ${esc(s.end)} · ${s.breakMin||0}m break</div>
           </div>
-          <div class="list-meta">${shiftHours(s).toFixed(1)}h</div>
-        </div>
-      `).join('') : '<div class="helper-note">No past shifts on record.</div>'}
-    </div>
-  `;
+          <div class="list-meta">${shiftHrs(s).toFixed(1)}h</div>
+        </div>`).join(''):'<div class="helper-note">No past shifts on record.</div>'}
+    </div>`;
 }
 
-// ── PROFILE ───────────────────────────────────────────────────
+// ── PROFILE ────────────────────────────────────────────────────
 function renderProfile() {
-  const emp = state.emp;
-  qs('#view-profile').innerHTML = `
+  const emp=state.emp;
+  qs('#view-profile').innerHTML=`
     <div class="page-header stack">
       <h1 class="page-title">Profile</h1>
-    </div>
-    <div style="display:flex;align-items:center;gap:16px;margin-bottom:20px">
-      <div style="width:60px;height:60px;border-radius:50%;background:linear-gradient(135deg,var(--gold-dim),var(--gold));display:flex;align-items:center;justify-content:center;font-size:1.3rem;font-weight:700;color:#0e0f14;box-shadow:0 4px 16px rgba(201,168,76,.3)">${esc(initials(emp))}</div>
-      <div>
-        <div style="font-family:'DM Serif Display',Georgia,serif;font-size:1.4rem">${esc(emp.first)} ${esc(emp.last)}</div>
-        <div class="list-copy">${esc(emp.role)}</div>
-      </div>
+      <div class="page-subtitle">A frontend-ready profile screen.</div>
     </div>
     <div class="info-grid">
-      ${emp.email ? `<div class="card"><div class="small-muted">Email</div><div class="list-title" style="margin-top:6px;font-size:.95rem">${esc(emp.email)}</div></div>` : ''}
-      ${emp.phone ? `<div class="card"><div class="small-muted">Phone</div><div class="list-title" style="margin-top:6px;font-size:.95rem">${esc(emp.phone)}</div></div>` : ''}
-      <div class="card"><div class="small-muted">Dispensary</div><div class="list-title" style="margin-top:6px;font-size:.95rem">Dukasa Dispensary</div></div>
+      <div class="card">
+        <div class="list-title" style="font-size:1.18rem">${esc(emp.first)} ${esc(emp.last)}</div>
+        <div class="list-copy">${esc(emp.role)}</div>
+      </div>
+      ${emp.email?`<div class="card"><div class="small-muted">Email</div><div class="list-title" style="font-size:1rem;margin-top:6px">${esc(emp.email)}</div></div>`:''}
+      ${emp.phone?`<div class="card"><div class="small-muted">Phone</div><div class="list-title" style="font-size:1rem;margin-top:6px">${esc(emp.phone)}</div></div>`:''}
+      <div class="card"><div class="small-muted">Location</div><div class="list-title" style="font-size:1rem;margin-top:6px">Melbourne</div></div>
+      <div class="card"><div class="small-muted">Team</div><div class="list-title" style="font-size:1rem;margin-top:6px">Dukasa Dispensary</div></div>
     </div>
-    <div style="margin-top:28px;text-align:center">
-      <button class="btn btn-secondary" onclick="signOut()" style="color:var(--red);border-color:rgba(248,113,113,.3)">Sign out</button>
-    </div>
-  `;
+    <div style="margin-top:24px;text-align:center">
+      <button class="btn btn-secondary" onclick="signOut()">Sign out</button>
+    </div>`;
 }
 
-// ── SMART SYNC ────────────────────────────────────────────────
-let _lastModified = '0';
-
-async function startSmartSync() {
-  _lastModified = (await getLastModified()) || '0';
-  setInterval(async () => {
+// ── SYNC ───────────────────────────────────────────────────────
+let _lm='0';
+async function startSync() {
+  try { _lm=(await gasGet('ping')).lastModified||'0'; } catch(e){}
+  setInterval(async()=>{
     try {
-      const ts = await getLastModified();
-      if (ts && ts !== _lastModified) {
-        _lastModified = ts;
-        const result = await gasGet('getAll');
-        if (result.ok) {
-          state.allData = result.data || {};
-          const staff = getList('staff');
-          const fresh = staff.find(s => s.id === state.emp.id);
-          if (fresh) state.emp = fresh;
-          renderAll();
-          const tb = qs('.topbar');
-          if (tb) { tb.style.transition = 'background .3s'; tb.style.background = 'rgba(201,168,76,.15)'; setTimeout(() => syncTopbar(), 600); }
-        }
+      const ts=(await gasGet('ping')).lastModified||'0';
+      if(ts!==_lm){
+        _lm=ts;
+        const r=await gasGet('getAll');
+        if(r.ok){ state.allData=r.data||{}; const f=getList('staff').find(s=>s.id===state.emp.id); if(f) state.emp=f; renderAll(); }
       }
-    } catch(e) { /* silent */ }
-  }, 10000);
+    }catch(e){}
+  },10000);
 }
 
-async function getLastModified() {
-  try { const r = await gasGet('ping'); return r.ok ? r.lastModified : _lastModified; }
-  catch(e) { return _lastModified; }
-}
-
-// ── LOADING ───────────────────────────────────────────────────
-function showLoading(msg = 'Loading…') {
-  document.body.innerHTML = `
-    <div style="min-height:100dvh;display:flex;flex-direction:column;align-items:center;justify-content:center;background:var(--bg);gap:20px">
-      <div style="font-size:40px">💊</div>
-      <div style="font-family:'DM Serif Display',Georgia,serif;font-size:1.3rem;color:var(--gold)">${esc(msg)}</div>
-      <div style="width:48px;height:3px;background:var(--surface-2);border-radius:2px;overflow:hidden">
-        <div style="height:100%;background:var(--gold);border-radius:2px;animation:loadbar 1.2s ease-in-out infinite"></div>
+// ── LOADING ────────────────────────────────────────────────────
+function showLoading() {
+  document.body.innerHTML=`
+    <div style="min-height:100dvh;display:flex;flex-direction:column;align-items:center;justify-content:center;background:#f0efe9;gap:16px">
+      <div style="font-size:36px">💊</div>
+      <div style="font-family:'DM Serif Display',Georgia,serif;font-size:1.3rem;color:#534AB7">Loading your portal…</div>
+      <div style="width:40px;height:3px;background:#e0dfd9;border-radius:2px;overflow:hidden">
+        <div style="height:100%;background:#534AB7;border-radius:2px;animation:lb 1.2s ease-in-out infinite"></div>
       </div>
     </div>
-    <style>@keyframes loadbar{0%{width:0%;margin-left:0}50%{width:70%;margin-left:15%}100%{width:0%;margin-left:100%}}</style>
-  `;
+    <style>@keyframes lb{0%{width:0%;margin-left:0}50%{width:70%;margin-left:15%}100%{width:0%;margin-left:100%}}</style>`;
 }
 
-// ── INIT ──────────────────────────────────────────────────────
+// ── INIT ───────────────────────────────────────────────────────
 async function init() {
-  const session = tryRestoreSession();
-  if (session) {
-    showLoading('Loading your portal…');
+  const sx=trySession();
+  if (sx) {
+    showLoading();
     try {
-      const result = await gasGet('getAll');
-      if (!result.ok) throw new Error(result.error || 'Could not load');
-      state.allData = result.data || {};
-      const staff = getList('staff');
-      const emp = staff.find(s => s.id === session.id && (s.email||'').toLowerCase() === session.email?.toLowerCase());
-      if (emp) { state.emp = emp; buildShell(); return; }
-    } catch(e) { console.warn('Session restore failed:', e.message); }
-    localStorage.removeItem('dukasa_session');
+      const r=await gasGet('getAll');
+      if(!r.ok) throw new Error(r.error||'Failed');
+      state.allData=r.data||{};
+      const emp=getList('staff').find(s=>s.id===sx.id&&(s.email||'').toLowerCase()===sx.email?.toLowerCase());
+      if(emp){ state.emp=emp; buildApp(); return; }
+    } catch(e){ console.warn('Session restore failed:',e.message); }
+    localStorage.removeItem('dukasa_sx');
   }
   showLogin();
 }

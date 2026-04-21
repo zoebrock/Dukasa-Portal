@@ -4,15 +4,17 @@
 // ============================================================
 
 const CONFIG = {
-  GAS_URL: 'https://script.google.com/macros/s/AKfycbw7x3V1dsrpZDVNyEwv1xflFEx2bOqDpL-gw5ZQnwAQxOywz0d3PD1WntJxrlS0EFC5/exec',
+  // Your GAS deployment URL — set as GAS_URL in Vercel Environment Variables
+  // The browser never calls GAS directly — all requests go through /api/gas
   API_KEY: '181049d1-b062-448a-a267-64824f1ef054',
+  PROXY: '/api/gas',
 };
 
 // ── STATE ───────────────────────────────────────────────────
 const state = {
   currentView: 'home',
-  emp: null,          // logged-in staff member object
-  allData: {},        // raw rx3_ data from GAS
+  emp: null,
+  allData: {},
   currentWeekStart: null,
   refreshTimer: null,
 };
@@ -71,9 +73,9 @@ function getList(key) {
   try { return JSON.parse(state.allData['rx3_' + key] || '[]'); } catch(e) { return []; }
 }
 
-// ── GAS API ─────────────────────────────────────────────────
+// ── GAS API — proxied through Vercel to avoid CORS ──────────
 async function gasGet(action, params = {}) {
-  const url = new URL(CONFIG.GAS_URL);
+  const url = new URL(CONFIG.PROXY, window.location.origin);
   url.searchParams.set('action', action);
   url.searchParams.set('key', CONFIG.API_KEY);
   Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v));
@@ -81,20 +83,19 @@ async function gasGet(action, params = {}) {
   if (!res.ok) throw new Error('Server error ' + res.status);
   const text = await res.text();
   try { return JSON.parse(text); }
-  catch(e) { throw new Error('Bad response from server — check GAS URL is correct'); }
+  catch(e) { throw new Error('Bad response — is GAS_URL set in Vercel Environment Variables?'); }
 }
 
 async function gasPost(body) {
-  // Must use Content-Type: text/plain to avoid CORS preflight OPTIONS request.
-  // GAS does not support OPTIONS responses, so application/json would be blocked.
-  const res = await fetch(CONFIG.GAS_URL, {
+  const res = await fetch(CONFIG.PROXY, {
     method: 'POST',
-    headers: { 'Content-Type': 'text/plain' },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ ...body, key: CONFIG.API_KEY }),
   });
-  if (!res.ok) throw new Error('GAS POST failed: ' + res.status);
+  if (!res.ok) throw new Error('Server error ' + res.status);
   const text = await res.text();
-  try { return JSON.parse(text); } catch(e) { return { ok: false, error: 'Bad response: ' + text.slice(0, 100) }; }
+  try { return JSON.parse(text); }
+  catch(e) { return { ok: false, error: 'Bad response: ' + text.slice(0, 100) }; }
 }
 
 async function saveList(key, arr) {

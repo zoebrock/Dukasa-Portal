@@ -312,6 +312,9 @@ function renderHome() {
   const allAnns = getList('announcements');
   const myAnns  = allAnns.filter(a => {
     if(a.date < td) return false; // past — auto-hide
+    // If specific staff IDs are set, check if current user is in the list
+    if(a.staffIds && a.staffIds.length > 0) return a.staffIds.includes(emp.id);
+    // Otherwise filter by department/role
     if(!a.roles||!a.roles.length) return true;
     if(a.roles.includes('All Staff')) return true;
     return a.roles.includes(emp.role);
@@ -392,6 +395,7 @@ window.openAnnPopup = function(annJson) {
   const dateObj   = new Date(a.date+'T00:00:00');
   const dateFull  = dateObj.toLocaleDateString('en-AU',{weekday:'long',day:'numeric',month:'long',year:'numeric'});
   const rolesLabel = (a.roles||[]).join(', ') || 'All Staff';
+  const audienceLabel = (a.staffIds&&a.staffIds.length>0) ? 'Selected staff members' : rolesLabel;
   const isToday   = a.date === today();
   const isTomorrow = a.date === addDays(today(),1);
   const relBadge  = isToday
@@ -443,7 +447,7 @@ window.openAnnPopup = function(annJson) {
             <span style="font-size:1.2rem">👥</span>
             <div>
               <div style="font-size:.7rem;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:#98988f">Applies to</div>
-              <div style="font-size:.9rem;color:#181816;margin-top:1px">${esc(rolesLabel)}</div>
+              <div style="font-size:.9rem;color:#181816;margin-top:1px">${esc(audienceLabel)}</div>
             </div>
           </div>
           ${a.desc?`<div style="border-top:1px solid #e8e7e1;padding-top:12px;margin-top:2px">

@@ -332,7 +332,7 @@ function renderHome() {
         const isToday = a.date===td;
         const isTomorrow = a.date===addDays(td,1);
         const relLabel = isToday?' · Today':isTomorrow?' · Tomorrow':'';
-        return `<div class="card list-card" style="cursor:pointer;border-left:3px solid #534AB7;padding-left:12px" onclick="openAnnPopup(${JSON.stringify(JSON.stringify(a))})">
+        return `<div class="card list-card" style="cursor:pointer;border-left:3px solid #534AB7;padding-left:12px" onclick="openAnnPopup('${a.id}')">
           <div style="flex:1;min-width:0">
             <div class="list-title" style="font-size:.95rem">${esc(a.title)}</div>
             <div class="list-copy" style="margin-top:3px;font-size:.8rem">📅 ${esc(dateLabel)}${esc(relLabel)}${a.time?` · 🕐 ${esc(a.time)}`:''}</div>
@@ -387,8 +387,10 @@ function renderHome() {
     </div>`;
 }
 
-window.openAnnPopup = function(annJson) {
-  const a = JSON.parse(annJson);
+window.openAnnPopup = function(annId) {
+  const allAnns = getList('announcements');
+  const a = allAnns.find(x => x.id === annId);
+  if (!a) return;
   const existing = qs('#ann-popup');
   if (existing) existing.remove();
 

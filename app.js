@@ -90,7 +90,7 @@ function showLogin(err='') {
         <div style="background:#fff;border:1px solid rgba(24,24,22,.09);border-radius:22px;padding:24px;box-shadow:0 4px 24px rgba(0,0,0,.06)">
           <div style="margin-bottom:14px">
             <label style="font-size:.7rem;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:#58584e;display:block;margin-bottom:6px">Email</label>
-            <input id="l-email" type="email" autocomplete="email" placeholder="your@dukasa.com.au" class="input" style="background:#f5f5f0">
+            <input id="l-email" type="email" autocomplete="email" placeholder="your@email.com" class="input" style="background:#f5f5f0">
           </div>
           <div style="margin-bottom:20px">
             <label style="font-size:.7rem;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:#58584e;display:block;margin-bottom:6px">PIN</label>
@@ -98,27 +98,103 @@ function showLogin(err='') {
           </div>
           <button id="l-btn" class="btn btn-primary" style="width:100%" onclick="doLogin()">Sign in</button>
         </div>
-        <p style="text-align:center;margin-top:14px;font-size:12px;color:#98988f">Contact your manager if you've forgotten your PIN.</p>
+        <p style="text-align:center;margin-top:14px;font-size:12px;color:#98988f">First time? Leave PIN blank and sign in with your email to set a new PIN.</p>
       </div>
     </div>`;
   qs('#l-pin')?.addEventListener('keydown', e=>{ if(e.key==='Enter') doLogin(); });
   qs('#l-email')?.addEventListener('keydown', e=>{ if(e.key==='Enter') qs('#l-pin')?.focus(); });
 }
 
+function showSetPin(emp, allData) {
+  document.body.innerHTML = `
+    <div style="min-height:100dvh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px;background:#f0efe9">
+      <div style="width:100%;max-width:360px">
+        <div style="text-align:center;margin-bottom:32px">
+          <div style="font-size:36px;margin-bottom:8px">💊</div>
+          <div style="font-family:'DM Serif Display',Georgia,serif;font-size:1.6rem;color:#534AB7">RosterRx</div>
+          <div style="font-size:.78rem;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:#98988f;margin-top:3px">Staff Portal</div>
+        </div>
+        <div style="background:#fff;border:1px solid rgba(24,24,22,.09);border-radius:22px;padding:24px;box-shadow:0 4px 24px rgba(0,0,0,.06)">
+          <div style="font-size:1.05rem;font-weight:700;color:#181816;margin-bottom:6px">Hi ${esc(emp.first)}, welcome!</div>
+          <div style="font-size:13px;color:#58584e;margin-bottom:20px;line-height:1.5">Please set a 4-digit PIN. You'll use this to clock in and out on the Dukasa Time Clock.</div>
+          <div id="pin-err" style="display:none;background:rgba(163,45,45,.08);border:1px solid rgba(163,45,45,.2);border-radius:10px;padding:10px 14px;font-size:13px;color:#A32D2D;margin-bottom:14px"></div>
+          <div style="margin-bottom:14px">
+            <label style="font-size:.7rem;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:#58584e;display:block;margin-bottom:6px">Choose a PIN</label>
+            <input id="sp-pin1" type="password" inputmode="numeric" maxlength="4" placeholder="••••" class="input" style="letter-spacing:6px;font-size:1.4rem;background:#f5f5f0">
+          </div>
+          <div style="margin-bottom:20px">
+            <label style="font-size:.7rem;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:#58584e;display:block;margin-bottom:6px">Confirm PIN</label>
+            <input id="sp-pin2" type="password" inputmode="numeric" maxlength="4" placeholder="••••" class="input" style="letter-spacing:6px;font-size:1.4rem;background:#f5f5f0">
+          </div>
+          <button id="sp-btn" class="btn btn-primary" style="width:100%" onclick="doSetPin('${emp.id}')">Set PIN &amp; sign in</button>
+        </div>
+      </div>
+    </div>`;
+  // pre-load the allData so doSetPin can use it
+  state.allData = allData;
+  state.emp = emp;
+  qs('#sp-pin2')?.addEventListener('keydown', e=>{ if(e.key==='Enter') doSetPin(emp.id); });
+}
+
+async function doSetPin(empId) {
+  const pin1 = (qs('#sp-pin1')?.value||'').trim();
+  const pin2 = (qs('#sp-pin2')?.value||'').trim();
+  const errEl = qs('#pin-err');
+  const btn = qs('#sp-btn');
+
+  function pinErr(msg) { if(errEl){errEl.style.display='block';errEl.textContent=msg;} }
+
+  if(!pin1 || pin1.length < 4) return pinErr('PIN must be 4 digits.');
+  if(!/^\d+$/.test(pin1))      return pinErr('PIN must be digits only.');
+  if(pin1 !== pin2)             return pinErr('PINs do not match — please try again.');
+
+  if(btn){btn.textContent='Saving…';btn.disabled=true;}
+  try {
+    // Update staff array with new PIN and save back to GAS
+    const staffArr = getList('staff');
+    const idx = staffArr.findIndex(s => s.id === empId);
+    if(idx < 0) throw new Error('Staff record not found.');
+    staffArr[idx].pin = pin1;
+    await saveList('staff', staffArr);
+    // Update local state and proceed into the app
+    state.emp = staffArr[idx];
+    localStorage.setItem('dukasa_sx', JSON.stringify({id:state.emp.id, email:state.emp.email, ts:Date.now()}));
+    toast('PIN set successfully!', 'success');
+    buildApp();
+  } catch(e) {
+    if(btn){btn.textContent='Set PIN & sign in';btn.disabled=false;}
+    pinErr('Could not save PIN: ' + e.message);
+  }
+}
+
 async function doLogin() {
   const email = (qs('#l-email')?.value||'').trim().toLowerCase();
   const pin   = (qs('#l-pin')?.value||'').trim();
   const btn   = qs('#l-btn');
-  if (!email||!pin) { showLogin('Please enter your email and PIN.'); return; }
+  if (!email) { showLogin('Please enter your email address.'); return; }
   if (btn) { btn.textContent='Signing in…'; btn.disabled=true; }
   try {
     const res = await gasGet('getAll');
     if (!res.ok) throw new Error(res.error||'Could not load data');
     state.allData = res.data||{};
-    const emp = getList('staff').find(s=>(s.email||'').toLowerCase()===email && String(s.pin||'')===pin);
-    if (!emp) { showLogin('Incorrect email or PIN — please try again.'); return; }
-    state.emp = emp;
-    localStorage.setItem('dukasa_sx', JSON.stringify({id:emp.id, email:emp.email, ts:Date.now()}));
+    const staffArr = getList('staff');
+    const empByEmail = staffArr.find(s=>(s.email||'').toLowerCase()===email);
+
+    // No account found for this email
+    if (!empByEmail) { showLogin('No account found for that email address.'); return; }
+
+    // No PIN set yet — show set-PIN screen (first login flow)
+    if (!empByEmail.pin || String(empByEmail.pin).trim()==='') {
+      showSetPin(empByEmail, res.data||{});
+      return;
+    }
+
+    // PIN provided but wrong
+    if (!pin) { showLogin('Please enter your PIN, or leave it blank if you haven\'t set one yet.'); return; }
+    if (String(empByEmail.pin) !== pin) { showLogin('Incorrect PIN — please try again.'); return; }
+
+    state.emp = empByEmail;
+    localStorage.setItem('dukasa_sx', JSON.stringify({id:empByEmail.id, email:empByEmail.email, ts:Date.now()}));
     buildApp();
   } catch(e) { showLogin('Could not connect: '+e.message); }
 }
@@ -717,7 +793,7 @@ function renderProfile() {
   qs('#view-profile').innerHTML=`
     <div class="page-header stack">
       <h1 class="page-title">Profile</h1>
-      <div class="page-subtitle">A frontend-ready profile screen.</div>
+      <div class="page-subtitle">Your account details.</div>
     </div>
     <div class="info-grid">
       <div class="card">
@@ -726,13 +802,73 @@ function renderProfile() {
       </div>
       ${emp.email?`<div class="card"><div class="small-muted">Email</div><div class="list-title" style="font-size:1rem;margin-top:6px">${esc(emp.email)}</div></div>`:''}
       ${emp.phone?`<div class="card"><div class="small-muted">Phone</div><div class="list-title" style="font-size:1rem;margin-top:6px">${esc(emp.phone)}</div></div>`:''}
-      <div class="card"><div class="small-muted">Location</div><div class="list-title" style="font-size:1rem;margin-top:6px">Melbourne</div></div>
-      <div class="card"><div class="small-muted">Team</div><div class="list-title" style="font-size:1rem;margin-top:6px">Dukasa Dispensary</div></div>
     </div>
-    <div style="margin-top:24px;text-align:center">
+
+    <div class="section-label" style="margin-top:24px">Security</div>
+    <div class="card" style="margin-bottom:8px">
+      <div style="font-weight:600;font-size:.95rem;margin-bottom:4px">Time Clock PIN</div>
+      <div style="font-size:.85rem;color:#58584e;margin-bottom:14px">Your 4-digit PIN is used to clock in and out on the Dukasa Time Clock. Change it here at any time.</div>
+      <div id="pin-change-err" style="display:none;background:rgba(163,45,45,.08);border:1px solid rgba(163,45,45,.2);border-radius:10px;padding:10px 14px;font-size:13px;color:#A32D2D;margin-bottom:12px"></div>
+      <div id="pin-change-ok" style="display:none;background:rgba(15,110,86,.08);border:1px solid rgba(15,110,86,.2);border-radius:10px;padding:10px 14px;font-size:13px;color:#0F6E56;margin-bottom:12px"></div>
+      <div class="form-grid">
+        <div class="input-wrap">
+          <label>New PIN</label>
+          <input class="input" id="pc-pin1" type="password" inputmode="numeric" maxlength="4" placeholder="••••" style="letter-spacing:4px;font-size:1.2rem">
+        </div>
+        <div class="input-wrap">
+          <label>Confirm PIN</label>
+          <input class="input" id="pc-pin2" type="password" inputmode="numeric" maxlength="4" placeholder="••••" style="letter-spacing:4px;font-size:1.2rem">
+        </div>
+        <div class="btn-row full-span">
+          <button class="btn btn-primary" id="pc-btn" onclick="changePin()">Update PIN</button>
+        </div>
+      </div>
+    </div>
+
+    <div style="margin-top:20px;text-align:center">
       <button class="btn btn-secondary" onclick="signOut()">Sign out</button>
     </div>`;
 }
+
+window.changePin = async function() {
+  const pin1 = (qs('#pc-pin1')?.value||'').trim();
+  const pin2 = (qs('#pc-pin2')?.value||'').trim();
+  const errEl = qs('#pin-change-err');
+  const okEl  = qs('#pin-change-ok');
+  const btn   = qs('#pc-btn');
+
+  if(errEl) errEl.style.display='none';
+  if(okEl)  okEl.style.display='none';
+
+  function pinErr(msg){if(errEl){errEl.style.display='block';errEl.textContent=msg;}}
+  function pinOk(msg) {if(okEl) {okEl.style.display='block'; okEl.textContent=msg;}}
+
+  if(!pin1||pin1.length<4) return pinErr('PIN must be 4 digits.');
+  if(!/^\d+$/.test(pin1))  return pinErr('PIN must be digits only.');
+  if(pin1!==pin2)          return pinErr('PINs do not match — please try again.');
+
+  if(btn){btn.textContent='Saving…';btn.disabled=true;}
+  try {
+    const res = await gasGet('getAll');
+    if(!res.ok) throw new Error(res.error||'Could not load data');
+    state.allData = res.data||{};
+    const staffArr = getList('staff');
+    const idx = staffArr.findIndex(s=>s.id===state.emp.id);
+    if(idx<0) throw new Error('Staff record not found.');
+    staffArr[idx].pin = pin1;
+    await saveList('staff', staffArr);
+    state.emp = staffArr[idx];
+    // Update session
+    localStorage.setItem('dukasa_sx', JSON.stringify({id:state.emp.id, email:state.emp.email, ts:Date.now()}));
+    if(btn){btn.textContent='Update PIN';btn.disabled=false;}
+    if(qs('#pc-pin1')) qs('#pc-pin1').value='';
+    if(qs('#pc-pin2')) qs('#pc-pin2').value='';
+    pinOk('PIN updated successfully. Your new PIN is active immediately.');
+  } catch(e) {
+    if(btn){btn.textContent='Update PIN';btn.disabled=false;}
+    pinErr('Could not save: '+e.message);
+  }
+};
 
 // ── PULL TO REFRESH ────────────────────────────────────────────
 function initPullToRefresh() {

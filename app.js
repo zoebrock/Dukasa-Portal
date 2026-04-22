@@ -308,6 +308,37 @@ function renderHome() {
     todayCard=`<div class="card card-compact"><span class="helper-note">No shift scheduled today.</span></div>`;
   }
 
+  // ── ANNOUNCEMENTS ──────────────────────────────────────────
+  const allAnns = getList('announcements');
+  const myAnns  = allAnns.filter(a => {
+    if(a.date < td) return false; // past — auto-hide
+    if(!a.roles||!a.roles.length) return true;
+    if(a.roles.includes('All Staff')) return true;
+    return a.roles.includes(emp.role);
+  }).sort((a,b)=>a.date.localeCompare(b.date));
+
+  const annSection = myAnns.length ? `
+    <div class="section-label" style="display:flex;align-items:center;gap:6px">
+      <span>📣 Announcements</span>
+      <span style="font-size:10px;background:#534AB7;color:#fff;border-radius:10px;padding:1px 7px;font-weight:700">${myAnns.length}</span>
+    </div>
+    <div class="info-grid" style="margin-bottom:4px">
+      ${myAnns.map(a=>{
+        const dateObj = new Date(a.date+'T00:00:00');
+        const dateLabel = dateObj.toLocaleDateString('en-AU',{weekday:'short',day:'numeric',month:'short'});
+        const isToday = a.date===td;
+        const isTomorrow = a.date===addDays(td,1);
+        const relLabel = isToday?' · Today':isTomorrow?' · Tomorrow':'';
+        return `<div class="card list-card" style="cursor:pointer;border-left:3px solid #534AB7;padding-left:12px" onclick="openAnnPopup(${JSON.stringify(JSON.stringify(a))})">
+          <div style="flex:1;min-width:0">
+            <div class="list-title" style="font-size:.95rem">${esc(a.title)}</div>
+            <div class="list-copy" style="margin-top:3px;font-size:.8rem">📅 ${esc(dateLabel)}${esc(relLabel)}${a.time?` · 🕐 ${esc(a.time)}`:''}</div>
+          </div>
+          <div style="font-size:1.2rem;color:#534AB7;flex-shrink:0">›</div>
+        </div>`;
+      }).join('')}
+    </div>` : '';
+
   const week = Array.from({length:7},(_,i)=>{
     const ds=addDays(ws,i); const d=new Date(ds+'T00:00:00');
     return {dow:d.toLocaleDateString('en-AU',{weekday:'short'}),num:d.getDate(),ds,
@@ -329,6 +360,7 @@ function renderHome() {
       </div>
     </div>
     ${todayCard}
+    ${annSection}
     <div class="section-label">This week at a glance</div>
     <div class="week-strip">
       ${week.map(d=>`
@@ -351,6 +383,82 @@ function renderHome() {
         </div>`).join(''):'<div class="helper-note">No upcoming shifts scheduled.</div>'}
     </div>`;
 }
+
+window.openAnnPopup = function(annJson) {
+  const a = JSON.parse(annJson);
+  const existing = qs('#ann-popup');
+  if (existing) existing.remove();
+
+  const dateObj   = new Date(a.date+'T00:00:00');
+  const dateFull  = dateObj.toLocaleDateString('en-AU',{weekday:'long',day:'numeric',month:'long',year:'numeric'});
+  const rolesLabel = (a.roles||[]).join(', ') || 'All Staff';
+  const isToday   = a.date === today();
+  const isTomorrow = a.date === addDays(today(),1);
+  const relBadge  = isToday
+    ? `<span style="background:#EEEDFE;color:#534AB7;font-size:.75rem;font-weight:700;padding:2px 10px;border-radius:20px;margin-left:8px">Today</span>`
+    : isTomorrow
+    ? `<span style="background:#FAEEDA;color:#BA7517;font-size:.75rem;font-weight:700;padding:2px 10px;border-radius:20px;margin-left:8px">Tomorrow</span>`
+    : '';
+
+  const popup = document.createElement('div');
+  popup.id = 'ann-popup';
+  popup.style.cssText = 'position:fixed;inset:0;z-index:500;display:flex;align-items:flex-end;justify-content:center;background:rgba(0,0,0,.45);backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);animation:fadeIn .2s ease';
+  popup.innerHTML = `
+    <div style="width:100%;max-width:520px;background:#fff;border-radius:22px 22px 0 0;padding:0 0 calc(env(safe-area-inset-bottom,0px) + 8px);animation:slideUp .28s cubic-bezier(.22,1,.36,1);overflow:hidden">
+      <!-- Purple header bar -->
+      <div style="background:#534AB7;padding:20px 22px 18px">
+        <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px">
+          <div style="flex:1">
+            <div style="font-size:.7rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#AFA9EC;margin-bottom:5px">📣 Announcement</div>
+            <div style="font-size:1.25rem;font-weight:700;color:#fff;line-height:1.25">${esc(a.title)}</div>
+          </div>
+          <button onclick="document.getElementById('ann-popup').remove()" style="background:rgba(255,255,255,.15);border:none;color:#fff;border-radius:50%;width:32px;height:32px;font-size:18px;cursor:pointer;flex-shrink:0;display:flex;align-items:center;justify-content:center;line-height:1">×</button>
+        </div>
+      </div>
+      <!-- Details -->
+      <div style="padding:18px 22px">
+        <div style="display:flex;flex-direction:column;gap:10px">
+          <div style="display:flex;align-items:center;gap:10px">
+            <span style="font-size:1.2rem">📅</span>
+            <div>
+              <div style="font-size:.7rem;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:#98988f">Date</div>
+              <div style="font-size:.95rem;font-weight:600;color:#181816;margin-top:1px">${esc(dateFull)}${relBadge}</div>
+            </div>
+          </div>
+          ${a.time?`<div style="display:flex;align-items:center;gap:10px">
+            <span style="font-size:1.2rem">🕐</span>
+            <div>
+              <div style="font-size:.7rem;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:#98988f">Time</div>
+              <div style="font-size:.95rem;font-weight:600;color:#181816;margin-top:1px">${esc(a.time)}</div>
+            </div>
+          </div>`:''}
+          ${a.location?`<div style="display:flex;align-items:center;gap:10px">
+            <span style="font-size:1.2rem">📍</span>
+            <div>
+              <div style="font-size:.7rem;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:#98988f">Location</div>
+              <div style="font-size:.95rem;font-weight:600;color:#181816;margin-top:1px">${esc(a.location)}</div>
+            </div>
+          </div>`:''}
+          <div style="display:flex;align-items:center;gap:10px">
+            <span style="font-size:1.2rem">👥</span>
+            <div>
+              <div style="font-size:.7rem;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:#98988f">Applies to</div>
+              <div style="font-size:.9rem;color:#181816;margin-top:1px">${esc(rolesLabel)}</div>
+            </div>
+          </div>
+          ${a.desc?`<div style="border-top:1px solid #e8e7e1;padding-top:12px;margin-top:2px">
+            <div style="font-size:.7rem;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:#98988f;margin-bottom:6px">Details</div>
+            <div style="font-size:.9rem;color:#3a3a35;line-height:1.55;white-space:pre-wrap">${esc(a.desc)}</div>
+          </div>`:''}
+        </div>
+        <button onclick="document.getElementById('ann-popup').remove()" class="btn btn-secondary" style="width:100%;margin-top:18px">Close</button>
+      </div>
+    </div>`;
+
+  // Tap backdrop to dismiss
+  popup.addEventListener('click', e=>{ if(e.target===popup) popup.remove(); });
+  document.body.appendChild(popup);
+};
 
 // ── ROSTER ─────────────────────────────────────────────────────
 function renderRoster() {

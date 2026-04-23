@@ -292,17 +292,55 @@ function renderHome() {
   const todaySick  = sick.find(s=>s.date===td);
   const todayLeave = leaves.find(l=>l.status==='approved'&&l.from<=td&&l.to>=td);
 
+  // ── BREAK TIMER ────────────────────────────────────────────
+  const ce = getList('clockEvents').filter(e=>e.empId===emp.id&&e.date===td);
+  const bsEvent = [...ce].reverse().find(e=>e.type==='break-start');
+  const beEvent = bsEvent ? ce.find(e=>e.type==='break-end'&&e.ts>bsEvent.ts) : null;
+  const onBreak  = bsEvent && !beEvent;
+
+  // Break duration display rule:
+  // < 8h shift → 30 min break (all paid)
+  // 8h shift   → 40 min total (30 paid + 10 unpaid)
+  // > 8h shift → 50 min total (30 paid + 20 unpaid)
+  function shiftBreakInfo(shift) {
+    if(!shift) return {total:30, paid:30, unpaid:0};
+    const gross = parseTime(shift.end) - parseTime(shift.start);
+    const grossHrs = gross / 60;
+    if(grossHrs > 8)  return {total:50, paid:30, unpaid:20};
+    if(grossHrs >= 8) return {total:40, paid:30, unpaid:10};
+    return {total:30, paid:30, unpaid:0};
+  }
+  const breakInfo = shiftBreakInfo(todayShift);
+
+  const breakBanner = onBreak ? `
+    <div id="break-timer-banner" style="background:linear-gradient(135deg,#FAEEDA,#fff8f0);border:1.5px solid rgba(186,117,23,.3);border-radius:var(--r);padding:16px 18px;margin-bottom:16px">
+      <div style="font-size:.7rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#BA7517;margin-bottom:6px">☕ On break</div>
+      <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:6px">
+        <div style="font-family:'DM Serif Display',Georgia,serif;font-size:2.2rem;letter-spacing:-.03em;color:#181816" id="break-elapsed">00:00</div>
+        <div style="font-size:.85rem;color:#BA7517;font-weight:600">elapsed</div>
+      </div>
+      <div style="font-size:.82rem;color:#58584e">
+        Break: <strong>${breakInfo.total} min</strong>
+      </div>
+      <div style="font-size:.75rem;color:#98988f;margin-top:4px">Clock back in at the Dukasa Time Clock when ready.</div>
+    </div>` : '';
+
+  // Show break info in Today's shift card — total break only, no paid/unpaid
+  const breakLine = todayShift ? `${todayShift.breakMin||breakInfo.total} min break` : '';
+
   let todayCard;
   if (todaySick) {
     todayCard=`<div class="card card-compact" style="border-color:rgba(163,45,45,.25);background:rgba(163,45,45,.06)"><span style="font-weight:600;color:#A32D2D">🤒 Sick day recorded today</span></div>`;
   } else if (todayLeave) {
     todayCard=`<div class="card card-compact" style="border-color:rgba(15,110,86,.2);background:rgba(15,110,86,.06)"><span style="font-weight:600;color:#0F6E56">🏖 On approved leave today</span></div>`;
   } else if (todayShift) {
-    const h=shiftHrs(todayShift);
+    const grossMins = parseTime(todayShift.end)-parseTime(todayShift.start);
+    const grossHrs  = grossMins/60;
+    const h = Math.max(0,(grossMins - (grossHrs>8?50:grossHrs>=8?40:30))/60);
     todayCard=`<div class="card card-purple">
       <div style="font-size:.72rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#534AB7;margin-bottom:4px">Today's shift</div>
       <div style="font-family:'DM Serif Display',Georgia,serif;font-size:1.9rem;letter-spacing:-.03em;color:#181816">${esc(todayShift.start)} – ${esc(todayShift.end)}</div>
-      <div class="list-copy" style="margin-top:3px">${todayShift.breakMin||0} min break · ${h.toFixed(1)} hrs</div>
+      <div class="list-copy" style="margin-top:3px">${breakLine} · ${h.toFixed(1)} hrs</div>
     </div>`;
   } else {
     todayCard=`<div class="card card-compact"><span class="helper-note">No shift scheduled today.</span></div>`;
@@ -363,6 +401,7 @@ function renderHome() {
       </div>
     </div>
     ${todayCard}
+    ${breakBanner}
     ${annSection}
     <div class="section-label">This week at a glance</div>
     <div class="week-strip">
@@ -500,7 +539,13 @@ function renderRoster() {
         let label='Off', meta='', bdr='', bg='';
         if (d.sick)  { label='Sick day'; bdr='rgba(163,45,45,.3)'; bg='rgba(163,45,45,.04)'; }
         else if (d.leave) { label=d.leave.type; bdr='rgba(15,110,86,.2)'; bg='rgba(15,110,86,.04)'; }
-        else if (d.shift) { label=`${d.shift.start}–${d.shift.end}`; meta=`${shiftHrs(d.shift).toFixed(1)} hrs · ${d.shift.breakMin||0}m break`; }
+        else if (d.shift) {
+          const grossHrs2 = (parseTime(d.shift.end)-parseTime(d.shift.start))/60;
+          const totalBreak = grossHrs2>8?50:grossHrs2>=8?40:30;
+          const netHrs = Math.max(0,(parseTime(d.shift.end)-parseTime(d.shift.start)-totalBreak)/60);
+          label=`${d.shift.start}–${d.shift.end}`;
+          meta=`${netHrs.toFixed(1)} hrs · ${totalBreak}min break`;
+        }
         if (d.isToday) bdr='#534AB7';
         return `<div class="card list-card" style="${bdr?`border-color:${bdr};`:''}${bg?`background:${bg};`:''}${d.isToday?'border-width:2px;':''}" >
           <div style="display:flex;gap:14px;align-items:flex-start;width:100%">
@@ -1061,18 +1106,65 @@ function startTicker() {
 }
 function tickOnce() {
   const now = new Date();
-  // Update clock display if it exists on screen
   const clockEl = qs('#home-clock');
   if (clockEl) clockEl.textContent = now.toLocaleTimeString('en-AU', {hour:'2-digit', minute:'2-digit'});
   const dateEl = qs('#home-date');
   if (dateEl) dateEl.textContent = now.toLocaleDateString('en-AU', {weekday:'long', day:'numeric', month:'long'});
-  // At midnight, today() changes — re-render the full home view so
-  // today's shift card, week strip active day etc. all update correctly
+
+  // ── Break elapsed timer ──────────────────────────────────
+  const elEl = qs('#break-elapsed');
+  if (elEl) {
+    // Find the latest break-start for today's user
+    const td = today();
+    const emp = state.emp;
+    if (emp) {
+      const ce = getList('clockEvents').filter(e=>e.empId===emp.id&&e.date===td);
+      const bsEv = [...ce].reverse().find(e=>e.type==='break-start');
+      const beEv = bsEv ? ce.find(e=>e.type==='break-end'&&e.ts>bsEv.ts) : null;
+      if (bsEv && !beEv) {
+        const bsTime = new Date(bsEv.ts);
+        const elapsedSec = Math.floor((now - bsTime) / 1000);
+        const mm = String(Math.floor(elapsedSec / 60)).padStart(2,'0');
+        const ss = String(elapsedSec % 60).padStart(2,'0');
+        elEl.textContent = `${mm}:${ss}`;
+        // Get total break for this shift to calculate remaining time
+        const banner = qs('#break-timer-banner');
+        if (banner) {
+          const shifts2 = getList('shifts').filter(s=>s.empId===emp.id&&s.published);
+          const ts2 = shifts2.find(s=>s.date===td);
+          const grossHrs2 = ts2 ? (parseTime(ts2.end)-parseTime(ts2.start))/60 : 0;
+          const totalBreakSec = (grossHrs2>8?50:grossHrs2>=8?40:30)*60;
+          const remainingSec = totalBreakSec - elapsedSec;
+          if (remainingSec <= 2*60) {
+            // 2 min or less remaining — red
+            banner.style.borderColor = 'rgba(163,45,45,.6)';
+            banner.style.background  = 'linear-gradient(135deg,#FCEBEB,#fff5f5)';
+            elEl.style.color = '#A32D2D';
+          } else if (remainingSec <= 5*60) {
+            // 5 min or less remaining — deep amber
+            banner.style.borderColor = 'rgba(186,117,23,.7)';
+            banner.style.background  = 'linear-gradient(135deg,#FAEEDA,#fff8f0)';
+            elEl.style.color = '#BA7517';
+          } else {
+            // Normal state
+            banner.style.borderColor = 'rgba(186,117,23,.3)';
+            banner.style.background  = 'linear-gradient(135deg,#FAEEDA,#fff8f0)';
+            elEl.style.color = '#181816';
+          }
+        }
+      } else if (beEv) {
+        // Break ended — re-render home to remove the banner
+        renderHome();
+      }
+    }
+  }
+
+  // At midnight re-render
   const newDate = today();
   if (newDate !== _tickerDate) {
     _tickerDate = newDate;
     renderHome();
-    renderRoster(); // roster highlights change at midnight too
+    renderRoster();
   }
 }
 

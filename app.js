@@ -292,38 +292,82 @@ function renderHome() {
   const todaySick  = sick.find(s=>s.date===td);
   const todayLeave = leaves.find(l=>l.status==='approved'&&l.from<=td&&l.to>=td);
 
-  // ── BREAK TIMER ────────────────────────────────────────────
-  const ce = getList('clockEvents').filter(e=>e.empId===emp.id&&e.date===td);
-  const bsEvent = [...ce].reverse().find(e=>e.type==='break-start');
-  const beEvent = bsEvent ? ce.find(e=>e.type==='break-end'&&e.ts>bsEvent.ts) : null;
-  const onBreak  = bsEvent && !beEvent;
+  // ── BREAK TRACKING ─────────────────────────────────────────────
+  // Sort all clock events by ts (falling back to time string) so ordering is reliable
+  const ce = getList('clockEvents')
+    .filter(e=>e.empId===emp.id&&e.date===td)
+    .sort((a,b)=>(a.ts||a.time||'').localeCompare(b.ts||b.time||''));
 
-  // Break duration display rule:
-  // < 8h shift → 30 min break (all paid)
-  // 8h shift   → 40 min total (30 paid + 10 unpaid)
-  // > 8h shift → 50 min total (30 paid + 20 unpaid)
-  function shiftBreakInfo(shift) {
-    if(!shift) return {total:30, paid:30, unpaid:0};
-    const gross = parseTime(shift.end) - parseTime(shift.start);
-    const grossHrs = gross / 60;
-    if(grossHrs > 8)  return {total:50, paid:30, unpaid:20};
-    if(grossHrs >= 8) return {total:40, paid:30, unpaid:10};
-    return {total:30, paid:30, unpaid:0};
+  // Pair up break-start / break-end events chronologically
+  // This correctly handles multiple breaks in one shift
+  function calcBreakSessions(events) {
+    const sessions = [];
+    let pending = null;
+    for (const e of events) {
+      if (e.type==='break-start') { pending = e; }
+      else if (e.type==='break-end' && pending) { sessions.push({start:pending, end:e}); pending=null; }
+    }
+    if (pending) sessions.push({start:pending, end:null}); // currently on break
+    return sessions;
   }
-  const breakInfo = shiftBreakInfo(todayShift);
 
-  const breakBanner = onBreak ? `
-    <div id="break-timer-banner" style="background:linear-gradient(135deg,#FAEEDA,#fff8f0);border:1.5px solid rgba(186,117,23,.3);border-radius:var(--r);padding:16px 18px;margin-bottom:16px">
-      <div style="font-size:.7rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#BA7517;margin-bottom:6px">☕ On break</div>
-      <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:6px">
-        <div style="font-family:'DM Serif Display',Georgia,serif;font-size:2.2rem;letter-spacing:-.03em;color:#181816" id="break-elapsed">00:00</div>
-        <div style="font-size:.85rem;color:#BA7517;font-weight:600">elapsed</div>
+  const breakSessions = calcBreakSessions(ce);
+  const activeBreak   = breakSessions.find(s=>!s.end);  // currently on break
+  const onBreak       = !!activeBreak;
+
+  // Total break minutes used (completed sessions)
+  const usedBreakMins = breakSessions
+    .filter(s=>s.end)
+    .reduce((sum, s)=>{
+      const startMs = s.start.ts ? new Date(s.start.ts).getTime() : 0;
+      const endMs   = s.end.ts   ? new Date(s.end.ts).getTime()   : 0;
+      return sum + (endMs > startMs ? Math.floor((endMs-startMs)/60000) : 0);
+    }, 0);
+
+  // Break rules from shift length
+  function shiftBreakInfo(shift) {
+    if(!shift) return {total:30};
+    const grossHrs = (parseTime(shift.end)-parseTime(shift.start))/60;
+    if(grossHrs > 8)  return {total:50};
+    if(grossHrs >= 8) return {total:40};
+    return {total:30};
+  }
+  const breakInfo      = shiftBreakInfo(todayShift);
+  const remainingMins  = Math.max(0, breakInfo.total - usedBreakMins);
+  const hasBreakLeft   = remainingMins > 0;
+
+  // Build break history lines for display
+  const breakHistory = breakSessions.filter(s=>s.end).map(s=>`${s.start.time}–${s.end.time}`).join(', ');
+
+  // Build the banner — shown when on break OR when there are completed breaks (to show remaining)
+  let breakBanner = '';
+  if (onBreak && activeBreak) {
+    const startTs = activeBreak.start.ts ? new Date(activeBreak.start.ts) : null;
+    const startTimeLabel = activeBreak.start.time || '';
+    breakBanner = `
+    <div id="break-timer-banner" data-start="${startTs ? startTs.toISOString() : ''}" data-total="${remainingMins}" style="background:#FAEEDA;border-radius:var(--r);padding:14px 16px;margin-bottom:12px;border:1.5px solid rgba(186,117,23,.35)">
+      <div style="font-size:.7rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#854F0B;margin-bottom:5px">On break${startTimeLabel ? ` · started ${startTimeLabel}` : ''}</div>
+      <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:5px">
+        <div id="break-elapsed" style="font-size:2.2rem;font-weight:500;letter-spacing:-.03em;color:#181816;font-variant-numeric:tabular-nums">00:00</div>
+        <div style="font-size:.85rem;color:#854F0B;font-weight:500">elapsed</div>
+        <div style="margin-left:auto;font-size:.85rem;font-weight:500;color:#533806">
+          <span id="break-remaining-label">${remainingMins > 0 ? remainingMins+' min remaining' : 'Break time used'}</span>
+        </div>
       </div>
-      <div style="font-size:.82rem;color:#58584e">
-        Break: <strong>${breakInfo.total} min</strong>
+      ${breakHistory ? `<div style="font-size:.75rem;color:#854F0B;margin-bottom:4px">Previous: ${breakHistory}</div>` : ''}
+      <div style="font-size:.75rem;color:#98988f">Clock back in at the Dukasa Time Clock when ready.</div>
+    </div>`;
+  } else if (!onBreak && breakSessions.length > 0 && todayShift) {
+    // Not on break, but has taken breaks — show summary + remaining
+    breakBanner = `
+    <div style="background:var(--s2);border-radius:var(--r);padding:12px 14px;margin-bottom:12px;border:1px solid var(--border)">
+      <div style="font-size:.75rem;font-weight:600;color:var(--t2);margin-bottom:4px">Break</div>
+      <div style="font-size:.85rem;color:var(--text)">Used ${usedBreakMins} of ${breakInfo.total} min
+        ${hasBreakLeft ? `<span style="color:#0F6E56;font-weight:600"> · ${remainingMins} min remaining</span>` : `<span style="color:#58584e"> · fully used</span>`}
       </div>
-      <div style="font-size:.75rem;color:#98988f;margin-top:4px">Clock back in at the Dukasa Time Clock when ready.</div>
-    </div>` : '';
+      ${breakHistory ? `<div style="font-size:.75rem;color:var(--t3);margin-top:3px">${breakHistory}</div>` : ''}
+    </div>`;
+  }
 
   // Show break info in Today's shift card — total break only, no paid/unpaid
   const breakLine = todayShift ? `${todayShift.breakMin||breakInfo.total} min break` : '';
@@ -1114,48 +1158,63 @@ function tickOnce() {
   // ── Break elapsed timer ──────────────────────────────────
   const elEl = qs('#break-elapsed');
   if (elEl) {
-    // Find the latest break-start for today's user
-    const td = today();
-    const emp = state.emp;
-    if (emp) {
-      const ce = getList('clockEvents').filter(e=>e.empId===emp.id&&e.date===td);
-      const bsEv = [...ce].reverse().find(e=>e.type==='break-start');
-      const beEv = bsEv ? ce.find(e=>e.type==='break-end'&&e.ts>bsEv.ts) : null;
-      if (bsEv && !beEv) {
-        const bsTime = new Date(bsEv.ts);
-        const elapsedSec = Math.floor((now - bsTime) / 1000);
-        const mm = String(Math.floor(elapsedSec / 60)).padStart(2,'0');
-        const ss = String(elapsedSec % 60).padStart(2,'0');
-        elEl.textContent = `${mm}:${ss}`;
-        // Get total break for this shift to calculate remaining time
-        const banner = qs('#break-timer-banner');
-        if (banner) {
-          const shifts2 = getList('shifts').filter(s=>s.empId===emp.id&&s.published);
-          const ts2 = shifts2.find(s=>s.date===td);
-          const grossHrs2 = ts2 ? (parseTime(ts2.end)-parseTime(ts2.start))/60 : 0;
-          const totalBreakSec = (grossHrs2>8?50:grossHrs2>=8?40:30)*60;
-          const remainingSec = totalBreakSec - elapsedSec;
-          if (remainingSec <= 2*60) {
-            // 2 min or less remaining — red
-            banner.style.borderColor = 'rgba(163,45,45,.6)';
-            banner.style.background  = 'linear-gradient(135deg,#FCEBEB,#fff5f5)';
-            elEl.style.color = '#A32D2D';
-          } else if (remainingSec <= 5*60) {
-            // 5 min or less remaining — deep amber
-            banner.style.borderColor = 'rgba(186,117,23,.7)';
-            banner.style.background  = 'linear-gradient(135deg,#FAEEDA,#fff8f0)';
-            elEl.style.color = '#BA7517';
-          } else {
-            // Normal state
-            banner.style.borderColor = 'rgba(186,117,23,.3)';
-            banner.style.background  = 'linear-gradient(135deg,#FAEEDA,#fff8f0)';
-            elEl.style.color = '#181816';
-          }
+    const banner  = qs('#break-timer-banner');
+    const startIso = banner ? banner.dataset.start : null;
+    const totalBreakMins = banner ? parseInt(banner.dataset.total||'30') : 30;
+    if (startIso) {
+      const startMs    = new Date(startIso).getTime();
+      const elapsedSec = Math.max(0, Math.floor((now.getTime() - startMs) / 1000));
+      const mm = String(Math.floor(elapsedSec/60)).padStart(2,'0');
+      const ss = String(elapsedSec%60).padStart(2,'0');
+      elEl.textContent = `${mm}:${ss}`;
+
+      // Remaining = total break - elapsed in this session
+      // (usedBreakMins from completed sessions is baked into the initial remainingMins label)
+      const remainLabel = qs('#break-remaining-label');
+      if (remainLabel) {
+        const elapsedMins = elapsedSec / 60;
+        // Read remaining from label's initial value encoded in banner data
+        const totalRemainSec = (totalBreakMins * 60) - elapsedSec;
+        const remMin = Math.floor(Math.max(0, totalRemainSec) / 60);
+        const remSec = Math.floor(Math.max(0, totalRemainSec) % 60);
+        if (totalRemainSec > 0) {
+          remainLabel.textContent = `${remMin}:${String(remSec).padStart(2,'0')} remaining`;
+        } else {
+          remainLabel.textContent = 'Break time up';
+          remainLabel.style.color = '#A32D2D';
         }
-      } else if (beEv) {
-        // Break ended — re-render home to remove the banner
-        renderHome();
       }
+
+      // Colour thresholds — based on remaining time
+      if (banner) {
+        if (totalBreakMins * 60 - elapsedSec <= 2 * 60) {
+          // 2 min or less — red
+          banner.style.borderColor = 'rgba(163,45,45,.6)';
+          banner.style.background  = '#FCEBEB';
+          elEl.style.color = '#791F1F';
+        } else if (totalBreakMins * 60 - elapsedSec <= 5 * 60) {
+          // 5 min or less — deep amber
+          banner.style.borderColor = 'rgba(186,117,23,.75)';
+          banner.style.background  = '#FAC775';
+          elEl.style.color = '#412402';
+        } else {
+          banner.style.borderColor = 'rgba(186,117,23,.35)';
+          banner.style.background  = '#FAEEDA';
+          elEl.style.color = '#181816';
+        }
+      }
+    }
+  }
+
+  // If break just ended (break-end event appeared since last tick), re-render home
+  if (!elEl) {
+    const emp2 = state.emp;
+    if (emp2) {
+      const ce2 = getList('clockEvents').filter(e=>e.empId===emp2.id&&e.date===today());
+      const hasActive = ce2.some(e=>e.type==='break-start') &&
+        !ce2.filter(e=>e.type==='break-end').length;
+      // If we had a banner before and now break ended, re-render
+      if (qs('#break-timer-banner') && !hasActive) renderHome();
     }
   }
 

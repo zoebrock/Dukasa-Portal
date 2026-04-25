@@ -29,7 +29,7 @@ function FDS(iso)  { return iso ? new Date(iso+'T00:00:00').toLocaleDateString('
 function FDOW(iso) { return iso ? new Date(iso+'T00:00:00').toLocaleDateString('en-AU',{weekday:'long'}) : ''; }
 
 function parseTime(t) { if (!t) return 0; const [h,m] = t.split(':').map(Number); return h*60+m; }
-function shiftHrs(s)  { return Math.max(0,(parseTime(s.end)-parseTime(s.start)-(s.breakMin||0))/60); }
+function shiftHrs(s)  { return Math.max(0,(parseTime(s.end)-parseTime(s.start)-(parseFloat(s.breakMin)||0))/60); }
 
 function weekStart(offset=0) {
   const d = new Date(); d.setHours(0,0,0,0);

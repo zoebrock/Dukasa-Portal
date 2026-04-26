@@ -41,7 +41,49 @@ function addDays(iso,n) {
   const d = new Date(iso+'T00:00:00'); d.setDate(d.getDate()+n);
   return localISO(d);
 }
-function getList(key) { try { return JSON.parse(state.allData['rx3_'+key]||'[]'); } catch(e){ return []; } }
+function normaliseRecord_(rec, key) {
+  // Safety net: if Sheets returned a time/date as a full Date string instead of
+  // "HH:mm" or "YYYY-MM-DD", convert it back to the correct short format.
+  // This handles cases where sheetReadAll_ on the server didn't fully normalise.
+  if (!rec || typeof rec !== 'object') return rec;
+  const TIME_FIELDS = ['start','end','customStart','customEnd','contractStart','contractEnd',
+                       'otOriginalStart','otOriginalEnd','time'];
+  const DATE_FIELDS = ['date','from','to','dob'];
+  const out = Object.assign({}, rec);
+  TIME_FIELDS.forEach(function(f) {
+    if (!out[f]) return;
+    const v = String(out[f]);
+    // Already correct HH:mm format
+    if (/^\d{1,2}:\d{2}$/.test(v)) return;
+    // Full Date string like "Sat Dec 30 1899 09:00:00 GMT+1000..."
+    // or ISO like "1899-12-30T09:00:00.000Z"
+    const d = new Date(v);
+    if (!isNaN(d.getTime())) {
+      out[f] = String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0');
+    }
+  });
+  DATE_FIELDS.forEach(function(f) {
+    if (!out[f]) return;
+    const v = String(out[f]);
+    // Already correct YYYY-MM-DD format
+    if (/^\d{4}-\d{2}-\d{2}$/.test(v)) return;
+    // Full Date string
+    const d = new Date(v);
+    if (!isNaN(d.getTime())) {
+      // Use local date parts to avoid UTC shift
+      out[f] = d.getFullYear() + '-' +
+               String(d.getMonth()+1).padStart(2,'0') + '-' +
+               String(d.getDate()).padStart(2,'0');
+    }
+  });
+  return out;
+}
+function getList(key) {
+  try {
+    const arr = JSON.parse(state.allData['rx3_'+key]||'[]');
+    return arr.map(function(r){ return normaliseRecord_(r, key); });
+  } catch(e){ return []; }
+}
 function initials(e) { return ((e.first||'')[0]||'')+((e.last||'')[0]||''); }
 
 // ── TOAST ──────────────────────────────────────────────────────

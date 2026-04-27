@@ -1253,22 +1253,25 @@ function tickOnce() {
     }
   }
 
-  // If break just ended (break-end event appeared since last tick), re-render home
+  // If no break-elapsed element, check whether we need to show a banner
+  // (catches cases where break started but renderHome hasn't re-run yet)
   if (!elEl) {
     const emp2 = state.emp;
     if (emp2) {
       const ce2 = getList('clockEvents')
         .filter(e=>e.empId===emp2.id&&e.date===today())
         .sort((a,b)=>(a.ts||a.time||'').localeCompare(b.ts||b.time||''));
-      // Correctly detect active break using session pairing (handles multiple breaks)
-      let pending2=null;
+      let pending2=null, hasActive=false;
       for(const e of ce2){
-        if(e.type==='break-start') pending2=e;
-        else if(e.type==='break-end'&&pending2) pending2=null;
+        if(e.type==='break-start'){pending2=e;hasActive=true;}
+        else if(e.type==='break-end'&&pending2){pending2=null;hasActive=false;}
       }
-      const hasActive = !!pending2;
-      // If we had a banner before and now break ended, re-render
-      if (qs('#break-timer-banner') && !hasActive) renderHome();
+      // Re-render home if:
+      // (a) break ended — had banner but no active break now
+      // (b) break started — no banner but now on break (local cache updated by 5s poll)
+      const hasBanner = !!qs('#break-timer-banner');
+      if (hasBanner && !hasActive) { _lastBreakState=false; renderHome(); }
+      else if (!hasBanner && hasActive) { _lastBreakState=true; renderHome(); }
     }
   }
 
@@ -1283,18 +1286,64 @@ function tickOnce() {
 
 // ── SYNC ───────────────────────────────────────────────────────
 let _lm='0';
+let _lastBreakState = false; // track whether we were on break last check
+
+async function checkBreakState_() {
+  // Lightweight break detector — runs every 5s independently of the main sync.
+  // Fetches only clockEvents for today and checks for an active break session.
+  // If break state changed (started or ended), triggers a full re-render.
+  if (!state.emp) return;
+  try {
+    const r = await gasGet('getAll');
+    if (!r.ok) return;
+    // Update clockEvents in local cache without overwriting everything
+    if (r.data && r.data['rx3_clockEvents'] !== undefined) {
+      state.allData['rx3_clockEvents'] = r.data['rx3_clockEvents'];
+    }
+    const td = today();
+    const ce = getList('clockEvents')
+      .filter(e=>e.empId===state.emp.id && e.date===td)
+      .sort((a,b)=>(a.ts||a.time||'').localeCompare(b.ts||b.time||''));
+    // Detect active break using session pairing
+    let pending=null, isOnBreak=false;
+    for (const e of ce) {
+      if (e.type==='break-start') { pending=e; isOnBreak=true; }
+      else if (e.type==='break-end' && pending) { pending=null; isOnBreak=false; }
+    }
+    // Re-render home if break state changed
+    if (isOnBreak !== _lastBreakState) {
+      _lastBreakState = isOnBreak;
+      renderHome();
+    }
+  } catch(e) { /* silent */ }
+}
+
 async function startSync() {
   try { _lm=(await gasGet('ping')).lastModified||'0'; } catch(e){}
+  // Main sync — full re-render every 10s if data changed
   setInterval(async()=>{
     try {
       const ts=(await gasGet('ping')).lastModified||'0';
       if(ts!==_lm){
         _lm=ts;
         const r=await gasGet('getAll');
-        if(r.ok){ state.allData=r.data||{}; const f=getList('staff').find(s=>s.id===state.emp.id); if(f) state.emp=f; renderAll(); }
+        if(r.ok){
+          state.allData=r.data||{};
+          const f=getList('staff').find(s=>s.id===state.emp.id);
+          if(f) state.emp=f;
+          renderAll();
+          // Update break state tracking after full sync
+          const td2=today();
+          const ce2=getList('clockEvents').filter(e=>e.empId===state.emp.id&&e.date===td2).sort((a,b)=>(a.ts||a.time||'').localeCompare(b.ts||b.time||''));
+          let p2=null, b2=false;
+          for(const e of ce2){ if(e.type==='break-start'){p2=e;b2=true;} else if(e.type==='break-end'&&p2){p2=null;b2=false;} }
+          _lastBreakState=b2;
+        }
       }
     }catch(e){}
   },10000);
+  // Break detector — polls every 5s specifically to catch break start/end quickly
+  setInterval(checkBreakState_, 5000);
 }
 
 // ── LOADING ────────────────────────────────────────────────────

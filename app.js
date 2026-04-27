@@ -389,30 +389,30 @@ function renderHome() {
     // data-total = full break entitlement; data-used = minutes already spent in previous sessions
     // The ticker calculates: remaining = (data-total * 60) - data-used*60 - elapsedThisSession
     breakBanner = `
-    <div id="break-timer-banner" data-start="${startTs ? startTs.toISOString() : ''}" data-total="${breakInfo.total}" data-used="${usedBreakMins}" style="background:#FAEEDA;border-radius:var(--r);padding:14px 16px;margin-bottom:12px;border:1.5px solid rgba(186,117,23,.35)">
-      <div style="font-size:.7rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#854F0B;margin-bottom:5px">☕ On break${startTimeLabel ? ` · started ${startTimeLabel}` : ''}</div>
-      <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:5px">
-        <div id="break-elapsed" style="font-size:2.2rem;font-weight:500;letter-spacing:-.03em;color:#181816;font-variant-numeric:tabular-nums">00:00</div>
-        <div style="font-size:.85rem;color:#854F0B;font-weight:500">elapsed this break</div>
-        <div style="margin-left:auto;font-size:.85rem;font-weight:500;color:#533806">
-          <span id="break-remaining-label">${remainingMins > 0 ? remainingMins+' min remaining' : 'Break time used'}</span>
+    <div id="break-timer-banner" class="card" data-start="${startTs ? startTs.toISOString() : ''}" data-total="${breakInfo.total}" data-used="${usedBreakMins}" style="background:#FEF3E2;border-color:rgba(186,117,23,.3);margin-bottom:10px">
+      <div style="font-size:.72rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#BA7517;margin-bottom:6px">☕ On break${startTimeLabel ? ` · started ${startTimeLabel}` : ''}</div>
+      <div style="display:flex;align-items:baseline;gap:10px;margin-bottom:4px">
+        <div id="break-elapsed" style="font-family:'DM Serif Display',Georgia,serif;font-size:1.9rem;letter-spacing:-.03em;color:#181816;font-variant-numeric:tabular-nums">00:00</div>
+        <div class="list-copy">elapsed this break</div>
+        <div style="margin-left:auto">
+          <span id="break-remaining-label" class="list-copy" style="font-weight:600;color:#BA7517">${remainingMins > 0 ? remainingMins+' min remaining' : 'Break time used'}</span>
         </div>
       </div>
-      ${breakHistory ? `<div style="font-size:.75rem;color:#854F0B;margin-bottom:4px">Previous: ${breakHistory}</div>` : ''}
-      <div style="font-size:.75rem;color:#98988f">Clock back in at the Dukasa Time Clock when ready.</div>
+      ${breakHistory ? `<div class="list-copy" style="margin-top:2px">Previous: ${breakHistory}</div>` : ''}
+      <div class="list-copy" style="margin-top:4px">Clock back in at the Dukasa Time Clock when ready.</div>
     </div>`;
   } else if (!onBreak && breakSessions.length > 0 && todayShift) {
     // Not on break, but has taken breaks — show summary + remaining
     breakBanner = `
-    <div style="background:var(--s2);border-radius:var(--r);padding:12px 14px;margin-bottom:12px;border:1px solid var(--border)">
-      <div style="font-size:.75rem;font-weight:600;color:var(--t2);margin-bottom:4px">☕ Break</div>
-      <div style="font-size:.85rem;color:var(--text)">Used ${usedBreakMins} of ${breakInfo.total} min
+    <div class="card card-compact" style="margin-bottom:10px">
+      <div style="font-size:.72rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--t2);margin-bottom:4px">☕ Break</div>
+      <div class="list-copy">Used ${usedBreakMins} of ${breakInfo.total} min
         ${hasBreakLeft
           ? `<span style="color:#0F6E56;font-weight:600"> · ${remainingMins} min remaining</span>`
-          : `<span style="color:#58584e"> · fully used</span>`}
+          : `<span style="color:var(--t2)"> · fully used</span>`}
       </div>
-      ${breakHistory ? `<div style="font-size:.75rem;color:var(--t3);margin-top:3px">${breakHistory}</div>` : ''}
-      ${hasBreakLeft ? `<div style="font-size:.75rem;color:#0F6E56;margin-top:4px;font-weight:500">✓ You can still take another break at the Dukasa Time Clock.</div>` : ''}
+      ${breakHistory ? `<div class="list-copy" style="margin-top:2px">${breakHistory}</div>` : ''}
+      ${hasBreakLeft ? `<div class="list-copy" style="margin-top:4px;color:#0F6E56;font-weight:500">✓ You can still take another break at the Dukasa Time Clock.</div>` : ''}
     </div>`;
   }
 
@@ -1235,19 +1235,26 @@ function tickOnce() {
       const remainSec = (totalBreakMins * 60) - (usedBreakMins * 60) - elapsedSec;
       if (banner) {
         if (remainSec <= 2 * 60) {
-          // 2 min or less — red
-          banner.style.borderColor = 'rgba(163,45,45,.6)';
+          // 2 min or less — red warning, matches card-red style
+          banner.style.borderColor = 'rgba(163,45,45,.3)';
           banner.style.background  = '#FCEBEB';
-          elEl.style.color = '#791F1F';
+          elEl.style.color = '#A32D2D';
+          const rl = qs('#break-remaining-label');
+          if (rl) rl.style.color = '#A32D2D';
         } else if (remainSec <= 5 * 60) {
           // 5 min or less — deep amber
-          banner.style.borderColor = 'rgba(186,117,23,.75)';
-          banner.style.background  = '#FAC775';
-          elEl.style.color = '#412402';
-        } else {
-          banner.style.borderColor = 'rgba(186,117,23,.35)';
+          banner.style.borderColor = 'rgba(186,117,23,.5)';
           banner.style.background  = '#FAEEDA';
+          elEl.style.color = '#633806';
+          const rl = qs('#break-remaining-label');
+          if (rl) rl.style.color = '#633806';
+        } else {
+          // Normal — amber card
+          banner.style.borderColor = 'rgba(186,117,23,.3)';
+          banner.style.background  = '#FEF3E2';
           elEl.style.color = '#181816';
+          const rl = qs('#break-remaining-label');
+          if (rl) rl.style.color = '#BA7517';
         }
       }
     }

@@ -1296,30 +1296,55 @@ let _lm='0';
 let _lastBreakState = false; // track whether we were on break last check
 
 async function checkBreakState_() {
-  // Lightweight break detector — runs every 5s independently of the main sync.
-  // Fetches only clockEvents for today and checks for an active break session.
-  // If break state changed (started or ended), triggers a full re-render.
+  // Break detector — checks both local cache AND server for break events.
+  // Runs every 5s, immediately on visibility change, and on window focus.
   if (!state.emp) return;
-  try {
-    const r = await gasGet('getAll');
-    if (!r.ok) return;
-    // Update clockEvents in local cache without overwriting everything
-    if (r.data && r.data['rx3_clockEvents'] !== undefined) {
-      state.allData['rx3_clockEvents'] = r.data['rx3_clockEvents'];
-    }
-    const td = today();
-    const ce = getList('clockEvents')
+
+  // ── Step 1: Check local cache first (zero network cost) ──────────────────
+  // If the clock outbox already confirmed the break event locally,
+  // we can detect and show the banner immediately from cache.
+  const td = today();
+  function detectBreak(ceList) {
+    const sorted = ceList
       .filter(e=>e.empId===state.emp.id && e.date===td)
       .sort((a,b)=>(a.ts||a.time||'').localeCompare(b.ts||b.time||''));
-    // Detect active break using session pairing
     let pending=null, isOnBreak=false;
-    for (const e of ce) {
+    for (const e of sorted) {
       if (e.type==='break-start') { pending=e; isOnBreak=true; }
       else if (e.type==='break-end' && pending) { pending=null; isOnBreak=false; }
     }
-    // Re-render home if break state changed
-    if (isOnBreak !== _lastBreakState) {
-      _lastBreakState = isOnBreak;
+    return isOnBreak;
+  }
+
+  const localBreak = detectBreak(getList('clockEvents'));
+  if (localBreak !== _lastBreakState) {
+    // Break state changed in local cache — render immediately, no network needed
+    _lastBreakState = localBreak;
+    renderHome();
+    // If we just detected a break start, no need to also fetch from server
+    if (localBreak) return;
+  }
+
+  // ── Step 2: Fetch server to catch events not yet in local cache ──────────
+  try {
+    const r = await gasGet('getAll');
+    if (!r.ok) return;
+    // Merge server clockEvents with local (local events win — never overwrite unsynced)
+    if (r.data && r.data['rx3_clockEvents'] !== undefined) {
+      const serverEvts = JSON.parse(r.data['rx3_clockEvents'] || '[]').map(function(rec) {
+        return normaliseRecord_(rec, 'clockEvents');
+      });
+      const localEvts = getList('clockEvents');
+      // Union deduped by id — local wins
+      const merged = {};
+      serverEvts.forEach(e => { if(e&&e.id) merged[e.id]=e; });
+      localEvts.forEach(e => { if(e&&e.id) merged[e.id]=e; });
+      const mergedArr = Object.values(merged);
+      state.allData['rx3_clockEvents'] = JSON.stringify(mergedArr);
+    }
+    const serverBreak = detectBreak(getList('clockEvents'));
+    if (serverBreak !== _lastBreakState) {
+      _lastBreakState = serverBreak;
       renderHome();
     }
   } catch(e) { /* silent */ }
@@ -1327,6 +1352,23 @@ async function checkBreakState_() {
 
 async function startSync() {
   try { _lm=(await gasGet('ping')).lastModified||'0'; } catch(e){}
+
+  // ── Immediate check when app is foregrounded ─────────────────────────────
+  // When a staff member switches from the clock to their phone, the break event
+  // may already be in their local cache (synced by checkBreakState_) but
+  // renderHome hasn't re-run yet. Fire immediately on visibility change.
+  document.addEventListener('visibilitychange', function() {
+    if (document.visibilityState === 'visible' && state.emp) {
+      // Check break state immediately without waiting for 5s poll
+      checkBreakState_();
+    }
+  });
+
+  // Also fire when window gains focus (covers PWA / home screen app scenarios)
+  window.addEventListener('focus', function() {
+    if (state.emp) checkBreakState_();
+  });
+
   // Main sync — full re-render every 10s if data changed
   setInterval(async()=>{
     try {

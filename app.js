@@ -29,7 +29,7 @@ function FDS(iso)  { return iso ? new Date(iso+'T00:00:00').toLocaleDateString('
 function FDOW(iso) { return iso ? new Date(iso+'T00:00:00').toLocaleDateString('en-AU',{weekday:'long'}) : ''; }
 
 function parseTime(t) { if (!t) return 0; const [h,m] = t.split(':').map(Number); return h*60+m; }
-function shiftHrs(s)  { return Math.max(0,(parseTime(s.end)-parseTime(s.start)-(parseFloat(s.breakMin)||0))/60); }
+function shiftHrs(s)  { return Math.max(0,(parseTime(s.end)-parseTime(s.start)-(s.breakMin||0))/60); }
 
 function weekStart(offset=0) {
   const d = new Date(); d.setHours(0,0,0,0);
@@ -41,49 +41,7 @@ function addDays(iso,n) {
   const d = new Date(iso+'T00:00:00'); d.setDate(d.getDate()+n);
   return localISO(d);
 }
-function normaliseRecord_(rec, key) {
-  // Safety net: if Sheets returned a time/date as a full Date string instead of
-  // "HH:mm" or "YYYY-MM-DD", convert it back to the correct short format.
-  // This handles cases where sheetReadAll_ on the server didn't fully normalise.
-  if (!rec || typeof rec !== 'object') return rec;
-  const TIME_FIELDS = ['start','end','customStart','customEnd','contractStart','contractEnd',
-                       'otOriginalStart','otOriginalEnd','time'];
-  const DATE_FIELDS = ['date','from','to','dob'];
-  const out = Object.assign({}, rec);
-  TIME_FIELDS.forEach(function(f) {
-    if (!out[f]) return;
-    const v = String(out[f]);
-    // Already correct HH:mm format
-    if (/^\d{1,2}:\d{2}$/.test(v)) return;
-    // Full Date string like "Sat Dec 30 1899 09:00:00 GMT+1000..."
-    // or ISO like "1899-12-30T09:00:00.000Z"
-    const d = new Date(v);
-    if (!isNaN(d.getTime())) {
-      out[f] = String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0');
-    }
-  });
-  DATE_FIELDS.forEach(function(f) {
-    if (!out[f]) return;
-    const v = String(out[f]);
-    // Already correct YYYY-MM-DD format
-    if (/^\d{4}-\d{2}-\d{2}$/.test(v)) return;
-    // Full Date string
-    const d = new Date(v);
-    if (!isNaN(d.getTime())) {
-      // Use local date parts to avoid UTC shift
-      out[f] = d.getFullYear() + '-' +
-               String(d.getMonth()+1).padStart(2,'0') + '-' +
-               String(d.getDate()).padStart(2,'0');
-    }
-  });
-  return out;
-}
-function getList(key) {
-  try {
-    const arr = JSON.parse(state.allData['rx3_'+key]||'[]');
-    return arr.map(function(r){ return normaliseRecord_(r, key); });
-  } catch(e){ return []; }
-}
+function getList(key) { try { return JSON.parse(state.allData['rx3_'+key]||'[]'); } catch(e){ return []; } }
 function initials(e) { return ((e.first||'')[0]||'')+((e.last||'')[0]||''); }
 
 // ── TOAST ──────────────────────────────────────────────────────
@@ -384,35 +342,32 @@ function renderHome() {
   // Build the banner — shown when on break OR when there are completed breaks (to show remaining)
   let breakBanner = '';
   if (onBreak && activeBreak) {
-    const startTs = activeBreak.start.ts ? new Date(activeBreak.start.ts) : null;
-    const startTimeLabel = activeBreak.start.time || '';
-    // data-total = full break entitlement; data-used = minutes already spent in previous sessions
-    // The ticker calculates: remaining = (data-total * 60) - data-used*60 - elapsedThisSession
+    const bs = activeBreak.start;
+    // Construct ISO timestamp: prefer ts field, fall back to date+time
+    const startIso = bs.ts || (bs.date && bs.time ? bs.date + 'T' + bs.time + ':00' : null);
+    const startTimeLabel = bs.time || '';
     breakBanner = `
-    <div id="break-timer-banner" class="card" data-start="${startTs ? startTs.toISOString() : ''}" data-total="${breakInfo.total}" data-used="${usedBreakMins}" style="background:#FEF3E2;border-color:rgba(186,117,23,.3);margin-bottom:10px">
-      <div style="font-size:.72rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#BA7517;margin-bottom:6px">☕ On break${startTimeLabel ? ` · started ${startTimeLabel}` : ''}</div>
-      <div style="display:flex;align-items:baseline;gap:10px;margin-bottom:4px">
-        <div id="break-elapsed" style="font-family:'DM Serif Display',Georgia,serif;font-size:1.9rem;letter-spacing:-.03em;color:#181816;font-variant-numeric:tabular-nums">00:00</div>
-        <div class="list-copy">elapsed this break</div>
-        <div style="margin-left:auto">
-          <span id="break-remaining-label" class="list-copy" style="font-weight:600;color:#BA7517">${remainingMins > 0 ? remainingMins+' min remaining' : 'Break time used'}</span>
+    <div id="break-timer-banner" data-start="${startIso||''}" data-total="${remainingMins}" style="background:#FAEEDA;border-radius:var(--r);padding:14px 16px;margin-bottom:12px;border:1.5px solid rgba(186,117,23,.35)">
+      <div style="font-size:.7rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#854F0B;margin-bottom:5px">☕ On break${startTimeLabel ? ' · started ' + startTimeLabel : ''}</div>
+      <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:5px">
+        <div id="break-elapsed" style="font-size:2.2rem;font-weight:500;letter-spacing:-.03em;color:#181816;font-variant-numeric:tabular-nums">00:00</div>
+        <div style="font-size:.85rem;color:#854F0B;font-weight:500">elapsed</div>
+        <div style="margin-left:auto;font-size:.85rem;font-weight:500;color:#533806">
+          <span id="break-remaining-label">${remainingMins > 0 ? remainingMins+' min remaining' : 'Break time used'}</span>
         </div>
       </div>
-      ${breakHistory ? `<div class="list-copy" style="margin-top:2px">Previous: ${breakHistory}</div>` : ''}
-      <div class="list-copy" style="margin-top:4px">Clock back in at the Dukasa Time Clock when ready.</div>
+      ${breakHistory ? `<div style="font-size:.75rem;color:#854F0B;margin-bottom:4px">Previous: ${breakHistory}</div>` : ''}
+      <div style="font-size:.75rem;color:#98988f">Clock back in at the Dukasa Time Clock when ready.</div>
     </div>`;
   } else if (!onBreak && breakSessions.length > 0 && todayShift) {
     // Not on break, but has taken breaks — show summary + remaining
     breakBanner = `
-    <div class="card card-compact" style="margin-bottom:10px">
-      <div style="font-size:.72rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--t2);margin-bottom:4px">☕ Break</div>
-      <div class="list-copy">Used ${usedBreakMins} of ${breakInfo.total} min
-        ${hasBreakLeft
-          ? `<span style="color:#0F6E56;font-weight:600"> · ${remainingMins} min remaining</span>`
-          : `<span style="color:var(--t2)"> · fully used</span>`}
+    <div style="background:var(--s2);border-radius:var(--r);padding:12px 14px;margin-bottom:12px;border:1px solid var(--border)">
+      <div style="font-size:.75rem;font-weight:600;color:var(--t2);margin-bottom:4px">Break</div>
+      <div style="font-size:.85rem;color:var(--text)">Used ${usedBreakMins} of ${breakInfo.total} min
+        ${hasBreakLeft ? `<span style="color:#0F6E56;font-weight:600"> · ${remainingMins} min remaining</span>` : `<span style="color:#58584e"> · fully used</span>`}
       </div>
-      ${breakHistory ? `<div class="list-copy" style="margin-top:2px">${breakHistory}</div>` : ''}
-      ${hasBreakLeft ? `<div class="list-copy" style="margin-top:4px;color:#0F6E56;font-weight:500">✓ You can still take another break at the Dukasa Time Clock.</div>` : ''}
+      ${breakHistory ? `<div style="font-size:.75rem;color:var(--t3);margin-top:3px">${breakHistory}</div>` : ''}
     </div>`;
   }
 
@@ -477,6 +432,49 @@ function renderHome() {
       hasShift:shifts.some(s=>s.date===ds), isSick:sick.some(s=>s.date===ds), isToday:ds===td};
   });
 
+  // ── TODAY'S TEAM ─────────────────────────────────────────────
+  const allStaff    = getList('staff');
+  const allShifts   = getList('shifts').filter(s=>s.date===td&&s.published&&s.empId!==emp.id);
+  const allSick     = getList('sickDays').filter(s=>s.date===td);
+  const allLeaves   = getList('leaveRequests').filter(l=>l.status==='approved'&&l.from<=td&&l.to>=td);
+
+  // Build team list — only colleagues with a shift today
+  const teamToday = allShifts.map(s=>{
+    const col = allStaff.find(x=>x.id===s.empId);
+    if(!col) return null;
+    const isSick  = allSick.some(sk=>sk.empId===col.id);
+    const onLeave = allLeaves.find(l=>l.empId===col.id);
+    const grossMins = parseTime(s.end) - parseTime(s.start);
+    const grossHrs  = grossMins / 60;
+    const totalBreak = grossHrs>8?50:grossHrs>=8?40:30;
+    const netHrs    = Math.max(0,(grossMins-totalBreak)/60);
+    return {col, s, isSick, onLeave, netHrs};
+  }).filter(Boolean).sort((a,b)=>a.col.first.localeCompare(b.col.first));
+
+  const teamSection = teamToday.length ? `
+    <div class="section-label">Today's team</div>
+    <div class="info-grid" style="margin-bottom:4px">
+      ${teamToday.map(({col,s,isSick,onLeave,netHrs})=>{
+        const initials = (col.first[0]||'')+(col.last[0]||'');
+        const statusBadge = isSick
+          ? `<span style="font-size:.72rem;background:#FCEBEB;color:#791F1F;padding:1px 7px;border-radius:10px;font-weight:600">🤒 Sick</span>`
+          : onLeave
+          ? `<span style="font-size:.72rem;background:#FAEEDA;color:#633806;padding:1px 7px;border-radius:10px;font-weight:600">🏖 ${esc(onLeave.type.replace(' Leave',''))}</span>`
+          : '';
+        const shiftLine = isSick||onLeave
+          ? `<div class="list-copy" style="text-decoration:line-through;opacity:.5">${esc(s.start)} – ${esc(s.end)}</div>`
+          : `<div class="list-copy">${esc(s.start)} – ${esc(s.end)} · ${netHrs.toFixed(1)}h</div>`;
+        return `<div class="card list-card" style="gap:10px">
+          <div style="width:34px;height:34px;border-radius:50%;background:${col.color}22;color:${col.color};display:flex;align-items:center;justify-content:center;font-size:.75rem;font-weight:700;flex-shrink:0">${esc(initials)}</div>
+          <div style="flex:1;min-width:0">
+            <div class="list-title" style="font-size:.9rem">${esc(col.first)} ${esc(col.last)}</div>
+            ${shiftLine}
+          </div>
+          ${statusBadge}
+        </div>`;
+      }).join('')}
+    </div>` : '';
+
   const upcoming = shifts.filter(s=>s.date>td).sort((a,b)=>a.date.localeCompare(b.date)).slice(0,5);
   const now      = new Date();
 
@@ -494,6 +492,7 @@ function renderHome() {
     ${todayCard}
     ${breakBanner}
     ${annSection}
+    ${teamSection}
     <div class="section-label">This week at a glance</div>
     <div class="week-strip">
       ${week.map(d=>`
@@ -796,7 +795,7 @@ window.openLeaveForm = function() {
         <div id="lv-err" style="display:none;color:#A32D2D;font-size:.82rem" class="full-span">⚠ Please enter valid from and to dates.</div>
         <div class="btn-row full-span">
           <button class="btn btn-secondary" onclick="qs('#lv-form').innerHTML=''">Cancel</button>
-          <button class="btn btn-primary" onclick="submitLeave()">Submit request</button>
+          <button class="btn btn-primary" id="lv-submit" onclick="submitLeave()">Submit request</button>
         </div>
       </div>
     </div>`;
@@ -805,16 +804,24 @@ window.openLeaveForm = function() {
 window.submitLeave = async function() {
   const type=qs('#lv-t')?.value, from=qs('#lv-f')?.value, to=qs('#lv-to')?.value, notes=(qs('#lv-n')?.value||'').trim();
   const errEl=qs('#lv-err');
+  const btn=qs('#lv-submit');
   if (!from||!to||from>to){ if(errEl) errEl.style.display='block'; return; }
   if (errEl) errEl.style.display='none';
+  if (btn) { btn.disabled=true; btn.textContent='Submitting...'; }
   const reqs=getList('leaveRequests');
   reqs.push({id:'lr'+Date.now(),empId:state.emp.id,type,from,to,notes,status:'pending',submitted:new Date().toISOString()});
   try {
     await saveList('leaveRequests',reqs);
-    await gasPost({action:'sendEmail',fn:'sendLeaveRequestNotification',payload:{empId:state.emp.id,type,from,to,notes,reason:notes}});
+    // Fire email notification without awaiting — don't block UI
+    gasPost({action:'sendEmail',fn:'sendLeaveRequestNotification',payload:{empId:state.emp.id,type,from,to,notes,reason:notes}})
+      .catch(err=>console.warn('Leave email failed (non-critical):',err));
     if(qs('#lv-form')) qs('#lv-form').innerHTML='';
-    renderLeave(); toast('Leave request submitted! ✓','success');
-  } catch(e){ toast('Could not submit — please try again.','error'); }
+    renderLeave();
+    toast('Leave request submitted! Your manager has been notified. ✓','success',5000);
+  } catch(e){
+    if (btn) { btn.disabled=false; btn.textContent='Submit request'; }
+    toast('Could not submit — please try again.','error');
+  }
 };
 
 // ── MC UPLOAD ──────────────────────────────────────────────────
@@ -977,7 +984,7 @@ window.openOTForm = function() {
         <div id="ot-err" style="display:none;color:#A32D2D;font-size:.82rem" class="full-span">⚠ Please fill in date and times.</div>
         <div class="btn-row full-span">
           <button class="btn btn-secondary" onclick="qs('#ot-form').innerHTML=''">Cancel</button>
-          <button class="btn btn-primary" onclick="submitOT()">Submit</button>
+          <button class="btn btn-primary" id="ot-submit" onclick="submitOT()">Submit</button>
         </div>
       </div>
     </div>`;
@@ -986,16 +993,24 @@ window.openOTForm = function() {
 window.submitOT = async function() {
   const date=qs('#ot-d')?.value, start=qs('#ot-s')?.value, end=qs('#ot-e')?.value, reason=(qs('#ot-r')?.value||'').trim();
   const errEl=qs('#ot-err');
+  const btn=qs('#ot-submit');
   if(!date||!start||!end){if(errEl)errEl.style.display='block';return;}
   if(errEl)errEl.style.display='none';
+  if(btn){btn.disabled=true;btn.textContent='Submitting...';}
   const reqs=getList('otRequests');
   reqs.push({id:'ot'+Date.now(),empId:state.emp.id,date,start,end,reason,approved:null,requestedBy:'staff',submitted:new Date().toISOString()});
   try{
     await saveList('otRequests',reqs);
-    await gasPost({action:'sendEmail',fn:'sendOTRequestNotification',payload:{empId:state.emp.id,date,start,end,reason}});
+    // Fire email without awaiting — don't block UI on email delivery
+    gasPost({action:'sendEmail',fn:'sendOTRequestNotification',payload:{empId:state.emp.id,date,start,end,reason}})
+      .catch(err=>console.warn('OT email failed (non-critical):',err));
     if(qs('#ot-form')) qs('#ot-form').innerHTML='';
-    renderOT(); toast('OT request submitted! ✓','success');
-  }catch(e){toast('Could not submit — please try again.','error');}
+    renderOT();
+    toast('OT request submitted! Your manager has been notified. ✓','success',5000);
+  }catch(e){
+    if(btn){btn.disabled=false;btn.textContent='Submit';}
+    toast('Could not submit — please try again.','error');
+  }
 };
 
 // ── HOURS ──────────────────────────────────────────────────────
@@ -1205,81 +1220,52 @@ function tickOnce() {
   // ── Break elapsed timer ──────────────────────────────────
   const elEl = qs('#break-elapsed');
   if (elEl) {
-    const banner  = qs('#break-timer-banner');
-    const startIso = banner ? banner.dataset.start : null;
-    // data-total = total break entitlement (minutes); data-used = minutes used in previous sessions
-    const totalBreakMins = banner ? parseInt(banner.dataset.total||'30') : 30;
-    const usedBreakMins  = banner ? parseInt(banner.dataset.used||'0')   : 0;
-    if (startIso) {
+    const banner    = qs('#break-timer-banner');
+    const startIso  = banner ? banner.dataset.start : null;
+    const remainingMinsAtStart = banner ? parseInt(banner.dataset.total||'30') : 30; // mins remaining when break started
+    if (startIso && !isNaN(new Date(startIso).getTime())) {
       const startMs    = new Date(startIso).getTime();
       const elapsedSec = Math.max(0, Math.floor((now.getTime() - startMs) / 1000));
       const mm = String(Math.floor(elapsedSec/60)).padStart(2,'0');
       const ss = String(elapsedSec%60).padStart(2,'0');
-      elEl.textContent = `${mm}:${ss}`;
+      elEl.textContent = mm+':'+ss;
 
-      // Remaining = total entitlement - already used in previous sessions - elapsed this session
+      // Remaining = remaining mins at break start - elapsed this session
+      const totalRemainSec = (remainingMinsAtStart * 60) - elapsedSec;
+      const remMin = Math.max(0, Math.floor(totalRemainSec / 60));
+      const remSec = Math.max(0, Math.floor(totalRemainSec % 60));
       const remainLabel = qs('#break-remaining-label');
       if (remainLabel) {
-        const totalRemainSec = (totalBreakMins * 60) - (usedBreakMins * 60) - elapsedSec;
-        const remMin = Math.floor(Math.max(0, totalRemainSec) / 60);
-        const remSec = Math.floor(Math.max(0, totalRemainSec) % 60);
         if (totalRemainSec > 0) {
-          remainLabel.textContent = `${remMin}:${String(remSec).padStart(2,'0')} remaining`;
+          remainLabel.textContent = remMin+':'+String(remSec).padStart(2,'0')+' remaining';
         } else {
           remainLabel.textContent = 'Break time up';
           remainLabel.style.color = '#A32D2D';
         }
       }
 
-      // Colour thresholds — based on remaining time accounting for all sessions
-      const remainSec = (totalBreakMins * 60) - (usedBreakMins * 60) - elapsedSec;
+      // Colour thresholds
       if (banner) {
-        if (remainSec <= 2 * 60) {
-          // 2 min or less — red warning, matches card-red style
-          banner.style.borderColor = 'rgba(163,45,45,.3)';
+        if (totalRemainSec <= 2 * 60) {
+          banner.style.borderColor = 'rgba(163,45,45,.6)';
           banner.style.background  = '#FCEBEB';
-          elEl.style.color = '#A32D2D';
-          const rl = qs('#break-remaining-label');
-          if (rl) rl.style.color = '#A32D2D';
-        } else if (remainSec <= 5 * 60) {
-          // 5 min or less — deep amber
-          banner.style.borderColor = 'rgba(186,117,23,.5)';
-          banner.style.background  = '#FAEEDA';
-          elEl.style.color = '#633806';
-          const rl = qs('#break-remaining-label');
-          if (rl) rl.style.color = '#633806';
+          elEl.style.color = '#791F1F';
+        } else if (totalRemainSec <= 5 * 60) {
+          banner.style.borderColor = 'rgba(186,117,23,.75)';
+          banner.style.background  = '#FAC775';
+          elEl.style.color = '#412402';
         } else {
-          // Normal — amber card
-          banner.style.borderColor = 'rgba(186,117,23,.3)';
-          banner.style.background  = '#FEF3E2';
+          banner.style.borderColor = 'rgba(186,117,23,.35)';
+          banner.style.background  = '#FAEEDA';
           elEl.style.color = '#181816';
-          const rl = qs('#break-remaining-label');
-          if (rl) rl.style.color = '#BA7517';
         }
       }
     }
   }
 
-  // If no break-elapsed element, check whether we need to show a banner
-  // (catches cases where break started but renderHome hasn't re-run yet)
-  if (!elEl) {
-    const emp2 = state.emp;
-    if (emp2) {
-      const ce2 = getList('clockEvents')
-        .filter(e=>e.empId===emp2.id&&e.date===today())
-        .sort((a,b)=>(a.ts||a.time||'').localeCompare(b.ts||b.time||''));
-      let pending2=null, hasActive=false;
-      for(const e of ce2){
-        if(e.type==='break-start'){pending2=e;hasActive=true;}
-        else if(e.type==='break-end'&&pending2){pending2=null;hasActive=false;}
-      }
-      // Re-render home if:
-      // (a) break ended — had banner but no active break now
-      // (b) break started — no banner but now on break (local cache updated by 5s poll)
-      const hasBanner = !!qs('#break-timer-banner');
-      if (hasBanner && !hasActive) { _lastBreakState=false; renderHome(); }
-      else if (!hasBanner && hasActive) { _lastBreakState=true; renderHome(); }
-    }
+  // Re-render home if break ended while on home screen
+  if (!qs('#break-elapsed') && qs('#break-timer-banner')) {
+    renderHome();
   }
 
   // At midnight re-render
@@ -1293,106 +1279,18 @@ function tickOnce() {
 
 // ── SYNC ───────────────────────────────────────────────────────
 let _lm='0';
-let _lastBreakState = false; // track whether we were on break last check
-
-async function checkBreakState_() {
-  // Break detector — checks both local cache AND server for break events.
-  // Runs every 5s, immediately on visibility change, and on window focus.
-  if (!state.emp) return;
-
-  // ── Step 1: Check local cache first (zero network cost) ──────────────────
-  // If the clock outbox already confirmed the break event locally,
-  // we can detect and show the banner immediately from cache.
-  const td = today();
-  function detectBreak(ceList) {
-    const sorted = ceList
-      .filter(e=>e.empId===state.emp.id && e.date===td)
-      .sort((a,b)=>(a.ts||a.time||'').localeCompare(b.ts||b.time||''));
-    let pending=null, isOnBreak=false;
-    for (const e of sorted) {
-      if (e.type==='break-start') { pending=e; isOnBreak=true; }
-      else if (e.type==='break-end' && pending) { pending=null; isOnBreak=false; }
-    }
-    return isOnBreak;
-  }
-
-  const localBreak = detectBreak(getList('clockEvents'));
-  if (localBreak !== _lastBreakState) {
-    // Break state changed in local cache — render immediately, no network needed
-    _lastBreakState = localBreak;
-    renderHome();
-    // If we just detected a break start, no need to also fetch from server
-    if (localBreak) return;
-  }
-
-  // ── Step 2: Fetch server to catch events not yet in local cache ──────────
-  try {
-    const r = await gasGet('getAll');
-    if (!r.ok) return;
-    // Merge server clockEvents with local (local events win — never overwrite unsynced)
-    if (r.data && r.data['rx3_clockEvents'] !== undefined) {
-      const serverEvts = JSON.parse(r.data['rx3_clockEvents'] || '[]').map(function(rec) {
-        return normaliseRecord_(rec, 'clockEvents');
-      });
-      const localEvts = getList('clockEvents');
-      // Union deduped by id — local wins
-      const merged = {};
-      serverEvts.forEach(e => { if(e&&e.id) merged[e.id]=e; });
-      localEvts.forEach(e => { if(e&&e.id) merged[e.id]=e; });
-      const mergedArr = Object.values(merged);
-      state.allData['rx3_clockEvents'] = JSON.stringify(mergedArr);
-    }
-    const serverBreak = detectBreak(getList('clockEvents'));
-    if (serverBreak !== _lastBreakState) {
-      _lastBreakState = serverBreak;
-      renderHome();
-    }
-  } catch(e) { /* silent */ }
-}
-
 async function startSync() {
   try { _lm=(await gasGet('ping')).lastModified||'0'; } catch(e){}
-
-  // ── Immediate check when app is foregrounded ─────────────────────────────
-  // When a staff member switches from the clock to their phone, the break event
-  // may already be in their local cache (synced by checkBreakState_) but
-  // renderHome hasn't re-run yet. Fire immediately on visibility change.
-  document.addEventListener('visibilitychange', function() {
-    if (document.visibilityState === 'visible' && state.emp) {
-      // Check break state immediately without waiting for 5s poll
-      checkBreakState_();
-    }
-  });
-
-  // Also fire when window gains focus (covers PWA / home screen app scenarios)
-  window.addEventListener('focus', function() {
-    if (state.emp) checkBreakState_();
-  });
-
-  // Main sync — full re-render every 10s if data changed
   setInterval(async()=>{
     try {
       const ts=(await gasGet('ping')).lastModified||'0';
       if(ts!==_lm){
         _lm=ts;
         const r=await gasGet('getAll');
-        if(r.ok){
-          state.allData=r.data||{};
-          const f=getList('staff').find(s=>s.id===state.emp.id);
-          if(f) state.emp=f;
-          renderAll();
-          // Update break state tracking after full sync
-          const td2=today();
-          const ce2=getList('clockEvents').filter(e=>e.empId===state.emp.id&&e.date===td2).sort((a,b)=>(a.ts||a.time||'').localeCompare(b.ts||b.time||''));
-          let p2=null, b2=false;
-          for(const e of ce2){ if(e.type==='break-start'){p2=e;b2=true;} else if(e.type==='break-end'&&p2){p2=null;b2=false;} }
-          _lastBreakState=b2;
-        }
+        if(r.ok){ state.allData=r.data||{}; const f=getList('staff').find(s=>s.id===state.emp.id); if(f) state.emp=f; renderAll(); }
       }
     }catch(e){}
   },10000);
-  // Break detector — polls every 5s specifically to catch break start/end quickly
-  setInterval(checkBreakState_, 5000);
 }
 
 // ── LOADING ────────────────────────────────────────────────────

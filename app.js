@@ -1529,4 +1529,11 @@ async function init() {
   showLogin();
 }
 
+
+// ── ERROR BOUNDARY ─────────────────────────────────────────────
+window.onerror = function(msg, src, line, col, err) {
+  document.body.innerHTML = '<div style="min-height:100dvh;display:flex;align-items:center;justify-content:center;padding:24px;background:#f0efe9"><div style="max-width:360px;width:100%;background:#fff;border-radius:16px;padding:24px;text-align:center"><div style="font-size:32px;margin-bottom:12px">💊</div><div style="font-family:Georgia,serif;font-size:1.4rem;color:#534AB7;margin-bottom:8px">RosterRx</div><div style="font-size:13px;color:#A32D2D;background:rgba(163,45,45,.08);border:1px solid rgba(163,45,45,.2);border-radius:10px;padding:12px;margin-bottom:16px">App error: ' + (msg||'unknown') + ' (line ' + line + ')</div><button onclick="location.reload()" style="background:#534AB7;color:#fff;border:none;border-radius:10px;padding:12px 24px;font-size:14px;cursor:pointer">Reload</button></div></div>';
+  return true;
+};
+
 init();

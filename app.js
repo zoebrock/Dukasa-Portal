@@ -3,7 +3,7 @@
 //  Live data via /api/gas proxy → Google Apps Script
 // ============================================================
 
-const CONFIG = { PROXY: '/api/gas' };
+const CONFIG = { PROXY: '/api/gas', SESSION_VERSION: 2 };
 
 const state = {
   currentView: 'home',
@@ -260,9 +260,7 @@ async function doLogin() {
     if (String(empByEmail.pin) !== pin) { showLogin('Incorrect PIN — please try again.'); return; }
 
     state.emp = empByEmail;
-    localStorage.setItem('dukasa_sx', JSON.stringify({id:empByEmail.id, email:empByEmail.email, ts:Date.now()}));
-    // Also store email as primary key for resilience across id changes
-
+    localStorage.setItem('dukasa_sx', JSON.stringify({id:empByEmail.id, email:empByEmail.email, ts:Date.now(), v:CONFIG.SESSION_VERSION}));
     buildApp();
   } catch(e) { showLogin('Could not connect: '+e.message); }
 }
@@ -270,9 +268,13 @@ async function doLogin() {
 function trySession() {
   try {
     const s = JSON.parse(localStorage.getItem('dukasa_sx')||'null');
-    if (!s || Date.now()-s.ts > 12*3600*1000) { localStorage.removeItem('dukasa_sx'); return false; }
+    // Clear session if it's old version or expired
+    if (!s || Date.now()-s.ts > 12*3600*1000 || s.v !== CONFIG.SESSION_VERSION) {
+      localStorage.removeItem('dukasa_sx');
+      return false;
+    }
     return s;
-  } catch(e) { return false; }
+  } catch(e) { localStorage.removeItem('dukasa_sx'); return false; }
 }
 
 function signOut() { localStorage.removeItem('dukasa_sx'); location.reload(); }
@@ -1529,7 +1531,7 @@ async function init() {
       if(emp){
         // Update stored session with current id
         state.emp=emp;
-        localStorage.setItem('dukasa_sx',JSON.stringify({id:emp.id,email:emp.email,ts:Date.now()}));
+        localStorage.setItem('dukasa_sx',JSON.stringify({id:emp.id,email:emp.email,ts:Date.now(),v:CONFIG.SESSION_VERSION}));
         buildApp(); return;
       }
     } catch(e){ console.warn('Session restore failed:',e.message); }

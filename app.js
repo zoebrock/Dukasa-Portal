@@ -25,8 +25,19 @@ function localISO(d) {
 const today = () => localISO(new Date());
 
 function FD(iso)   { return iso ? new Date(iso+'T00:00:00').toLocaleDateString('en-AU',{weekday:'long',day:'numeric',month:'long',year:'numeric'}) : ''; }
-function FDS(iso)  { return iso ? new Date(iso+'T00:00:00').toLocaleDateString('en-AU',{day:'numeric',month:'short'}) : ''; }
-function FDOW(iso) { return iso ? new Date(iso+'T00:00:00').toLocaleDateString('en-AU',{weekday:'long'}) : ''; }
+function FDS(iso)  {
+  if (!iso) return '';
+  // Ensure ISO format — reject obviously wrong formats
+  const d = new Date(String(iso).length === 10 ? iso+'T00:00:00' : iso);
+  if (isNaN(d.getTime())) return '';
+  return d.toLocaleDateString('en-AU',{day:'numeric',month:'short'});
+}
+function FDOW(iso) {
+  if (!iso) return '';
+  const d = new Date(String(iso).length === 10 ? iso+'T00:00:00' : iso);
+  if (isNaN(d.getTime())) return '';
+  return d.toLocaleDateString('en-AU',{weekday:'long'});
+}
 
 function parseTime(t) { if (!t) return 0; const [h,m] = t.split(':').map(Number); return h*60+m; }
 function shiftHrs(s)  { return Math.max(0,(parseTime(s.end)-parseTime(s.start)-(s.breakMin||0))/60); }
@@ -395,10 +406,10 @@ function renderHome() {
   // ── ANNOUNCEMENTS ──────────────────────────────────────────
   const allAnns = getList('announcements');
   const myAnns  = allAnns.filter(a => {
-    if(a.date < td) return false; // past — auto-hide
-    // If specific staff IDs are set, check if current user is in the list
+    const annDate = a.date && String(a.date).match(/^\d{4}-\d{2}-\d{2}$/) ? a.date : null;
+    if(!annDate) return false; // skip announcements with invalid dates
+    if(annDate < td) return false;
     if(a.staffIds && a.staffIds.length > 0) return a.staffIds.includes(emp.id);
-    // Otherwise filter by department/role
     if(!a.roles||!a.roles.length) return true;
     if(a.roles.includes('All Staff')) return true;
     return a.roles.includes(emp.role);
@@ -411,10 +422,11 @@ function renderHome() {
     </div>
     <div class="info-grid" style="margin-bottom:4px">
       ${myAnns.map(a=>{
-        const dateObj = new Date(a.date+'T00:00:00');
-        const dateLabel = dateObj.toLocaleDateString('en-AU',{weekday:'short',day:'numeric',month:'short'});
-        const isToday = a.date===td;
-        const isTomorrow = a.date===addDays(td,1);
+        const annDate = a.date && String(a.date).match(/^\d{4}-\d{2}-\d{2}$/) ? a.date : null;
+        const dateObj = annDate ? new Date(annDate+'T00:00:00') : null;
+        const dateLabel = dateObj ? dateObj.toLocaleDateString('en-AU',{weekday:'short',day:'numeric',month:'short'}) : (a.date||'');
+        const isToday = annDate===td;
+        const isTomorrow = annDate===addDays(td,1);
         const relLabel = isToday?' · Today':isTomorrow?' · Tomorrow':'';
         return `<div class="card list-card" style="cursor:pointer;border-left:3px solid #534AB7;padding-left:12px" onclick="openAnnPopup('${a.id}')">
           <div style="flex:1;min-width:0">
@@ -505,14 +517,20 @@ function renderHome() {
     </div>
     <div class="section-label">Upcoming shifts</div>
     <div class="info-grid">
-      ${upcoming.length?upcoming.map(s=>`
-        <div class="card list-card">
+      ${upcoming.length?upcoming.map(s=>{
+        const dayLabel = FDOW(s.date);
+        const dateLabel = FDS(s.date);
+        const hrs = shiftHrs(s);
+        const grossMins2 = parseTime(s.end)-parseTime(s.start);
+        const totalBreak2 = grossMins2/60>8?50:grossMins2/60>=8?40:30;
+        return `<div class="card list-card">
           <div>
-            <div class="list-title">${esc(FDOW(s.date))}, ${esc(FDS(s.date))}</div>
-            <div class="list-copy">${esc(s.start)} – ${esc(s.end)} · ${s.breakMin||0}min break</div>
+            <div class="list-title">${dayLabel?esc(dayLabel)+', ':''} ${esc(dateLabel)}</div>
+            <div class="list-copy">${esc(s.start||'?')} – ${esc(s.end||'?')} · ${totalBreak2}min break</div>
           </div>
-          <div class="list-meta">${shiftHrs(s).toFixed(1)}h</div>
-        </div>`).join(''):'<div class="helper-note">No upcoming shifts scheduled.</div>'}
+          <div class="list-meta">${isNaN(hrs)?'':hrs.toFixed(1)+'h'}</div>
+        </div>`;
+      }).join(''):'<div class="helper-note">No upcoming shifts scheduled.</div>'}
     </div>`;
 }
 

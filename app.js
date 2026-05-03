@@ -55,7 +55,18 @@ function addDays(iso,n) {
 function getList(key) {
   try {
     const arr = JSON.parse(state.allData['rx3_'+key]||'[]');
-    if (key === 'shifts') {
+    if (key === 'staff') {
+      // Filter out invalid records and ensure all fields have safe defaults
+      return arr.filter(s=>s&&s.id&&(s.email||s.first||s.last)).map(s=>({
+        ...s,
+        first: s.first||'',
+        last:  s.last||'',
+        email: s.email||'',
+        role:  s.role||'',
+        pin:   s.pin||'',
+        color: s.color||'#534AB7'
+      }));
+    }
       arr.forEach(s => {
         // Clean Sheets-mangled date/time fields
         if (s.start && s.start.length > 5) s.start = cleanTime_(s.start);
@@ -463,7 +474,7 @@ function renderHome() {
     if(!a.roles||!a.roles.length) return true;
     if(a.roles.includes('All Staff')) return true;
     return a.roles.includes(emp.role);
-  }).sort((a,b)=>a.date.localeCompare(b.date));
+  }).sort((a,b)=>(a.date||"").localeCompare(b.date||""));
 
   const annSection = myAnns.length ? `
     <div class="section-label" style="display:flex;align-items:center;gap:6px">
@@ -511,7 +522,7 @@ function renderHome() {
     const totalBreak = grossHrs>8?50:grossHrs>=8?40:30;
     const netHrs    = Math.max(0,(grossMins-totalBreak)/60);
     return {col, s, isSick, onLeave, netHrs};
-  }).filter(Boolean).sort((a,b)=>a.col.first.localeCompare(b.col.first));
+  }).filter(Boolean).sort((a,b)=>(a.col.first||"").localeCompare(b.col.first||""));
 
   const teamSection = teamToday.length ? `
     <div class="section-label">Today's team</div>
@@ -537,7 +548,7 @@ function renderHome() {
       }).join('')}
     </div>` : '';
 
-  const upcoming = shifts.filter(s=>s.date>td).sort((a,b)=>a.date.localeCompare(b.date)).slice(0,5);
+  const upcoming = shifts.filter(s=>s.date>td).sort((a,b)=>(a.date||"").localeCompare(b.date||"")).slice(0,5);
   const now      = new Date();
 
   qs('#view-home').innerHTML=`
@@ -780,7 +791,7 @@ window.openDayRoster = function(ds) {
   const rows = [];
 
   // Staff with shifts first (sorted by start time)
-  allShifts.slice().sort((a,b)=>a.start.localeCompare(b.start)).forEach(s=>{
+  allShifts.slice().sort((a,b)=>(a.start||"").localeCompare(b.start||"")).forEach(s=>{
     const col     = allStaff.find(x=>x.id===s.empId);
     if (!col) return;
     seen[s.empId] = true;
@@ -929,7 +940,7 @@ window.submitLate = async function() {
 function renderLeave() {
   const emp    = state.emp;
   const reqs   = getList('leaveRequests').filter(l=>l.empId===emp.id).sort((a,b)=>(b.submitted||b.from||'').localeCompare(a.submitted||a.from||''));
-  const sick   = getList('sickDays').filter(s=>s.empId===emp.id).sort((a,b)=>b.date.localeCompare(a.date));
+  const sick   = getList('sickDays').filter(s=>s.empId===emp.id).sort((a,b)=>(b.date||"").localeCompare(a.date||""));
   const mcs    = getList('medCerts').filter(m=>m.empId===emp.id);
   const pending= reqs.filter(l=>l.status==='pending');
   const hist   = reqs.filter(l=>l.status!=='pending');
@@ -1098,7 +1109,7 @@ window.submitMC = async function() {
 // ── OT ─────────────────────────────────────────────────────────
 function renderOT() {
   const emp  = state.emp;
-  const reqs = getList('otRequests').filter(o=>o.empId===emp.id).sort((a,b)=>b.date.localeCompare(a.date));
+  const reqs = getList('otRequests').filter(o=>o.empId===emp.id).sort((a,b)=>(b.date||"").localeCompare(a.date||""));
   const badge = o => {
     if(o.approved===true)  return `<span class="badge badge-green">Approved</span>`;
     if(o.approved===false) return `<span class="badge badge-red">Denied</span>`;
@@ -1227,7 +1238,7 @@ function renderHours() {
   const wkH  = shifts.filter(s=>s.date>=ws&&s.date<=we).reduce((t,s)=>t+shiftHrs(s),0);
   const moH  = shifts.filter(s=>s.date>=ms&&s.date<=me).reduce((t,s)=>t+shiftHrs(s),0);
   const futH = shifts.filter(s=>s.date>td).reduce((t,s)=>t+shiftHrs(s),0);
-  const rec  = shifts.filter(s=>s.date<=td).sort((a,b)=>b.date.localeCompare(a.date)).slice(0,8);
+  const rec  = shifts.filter(s=>s.date<=td).sort((a,b)=>(b.date||"").localeCompare(a.date||"")).slice(0,8);
 
   qs('#view-hours').innerHTML=`
     <div class="page-header stack">

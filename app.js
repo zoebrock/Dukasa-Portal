@@ -650,65 +650,148 @@ window.openAnnPopup = function(annId) {
 
 // ── ROSTER ─────────────────────────────────────────────────────
 function renderRoster() {
-  const emp    = state.emp;
-  const ws     = weekStart(state.weekOffset);
-  const we     = addDays(ws,6);
-  const shifts = getList('shifts').filter(s=>s.empId===emp.id&&s.published);
-  const sick   = getList('sickDays').filter(s=>s.empId===emp.id);
-  const leaves = getList('leaveRequests').filter(l=>l.empId===emp.id&&l.status==='approved');
-  const td     = today();
-  const wkTot  = shifts.filter(s=>s.date>=ws&&s.date<=we).reduce((t,s)=>t+shiftHrs(s),0);
+  const emp      = state.emp;
+  const ws       = weekStart(state.weekOffset);
+  const we       = addDays(ws,6);
+  const td       = today();
+
+  // Own shifts
+  const myShifts = getList('shifts').filter(s=>s.empId===emp.id&&s.published);
+  const mySick   = getList('sickDays').filter(s=>s.empId===emp.id);
+  const myLeaves = getList('leaveRequests').filter(l=>l.empId===emp.id&&l.status==='approved');
+
+  // All team data
+  const allStaff   = getList('staff');
+  const allShifts  = getList('shifts').filter(s=>s.published);
+  const allSick    = getList('sickDays');
+  const allLeaves  = getList('leaveRequests').filter(l=>l.status==='approved');
+
+  const wkTot = myShifts.filter(s=>s.date>=ws&&s.date<=we).reduce((t,s)=>t+shiftHrs(s),0);
 
   const days = Array.from({length:7},(_,i)=>{
-    const ds=addDays(ws,i);
-    return {ds, shift:shifts.find(s=>s.date===ds), sick:sick.find(s=>s.date===ds),
-      leave:leaves.find(l=>l.from<=ds&&l.to>=ds), isToday:ds===td};
+    const ds = addDays(ws,i);
+    return {
+      ds,
+      myShift: myShifts.find(s=>s.date===ds),
+      mySick:  mySick.find(s=>s.date===ds),
+      myLeave: myLeaves.find(l=>l.from<=ds&&l.to>=ds),
+      isToday: ds===td
+    };
   });
 
   qs('#view-roster').innerHTML=`
     <div class="page-header stack">
-      <h1 class="page-title">My roster</h1>
-      <div class="page-subtitle">${esc(FDS(ws))} – ${esc(FDS(we))} 2026 · ${wkTot.toFixed(1)} hrs</div>
+      <h1 class="page-title">Roster</h1>
+      <div class="page-subtitle">${esc(FDS(ws))} – ${esc(FDS(we))} · ${wkTot.toFixed(1)} hrs this week</div>
       <div class="btn-row" style="margin-top:12px">
-        <button class="btn btn-secondary btn-sm" onclick="rNav(-1)">‹ Previous week</button>
-        <button class="btn btn-secondary btn-sm" onclick="rNav(1)">Next week ›</button>
+        <button class="btn btn-secondary btn-sm" onclick="rNav(-1)">‹ Previous</button>
+        <button class="btn btn-secondary btn-sm" onclick="rNav(0)">Today</button>
+        <button class="btn btn-secondary btn-sm" onclick="rNav(1)">Next ›</button>
       </div>
     </div>
-    <div class="info-grid">
-      ${days.map(d=>{
-        const dObj=new Date(d.ds+'T00:00:00');
-        const dow=dObj.toLocaleDateString('en-AU',{weekday:'short'}).toUpperCase();
-        const num=dObj.getDate();
-        let label='Off', meta='', bdr='', bg='';
-        if (d.sick)  { label='Sick day'; bdr='rgba(163,45,45,.3)'; bg='rgba(163,45,45,.04)'; }
-        else if (d.leave) { label=d.leave.type; bdr='rgba(15,110,86,.2)'; bg='rgba(15,110,86,.04)'; }
-        else if (d.shift) {
-          const grossHrs2 = (parseTime(d.shift.end)-parseTime(d.shift.start))/60;
-          const totalBreak = grossHrs2>8?50:grossHrs2>=8?40:30;
-          const netHrs = Math.max(0,(parseTime(d.shift.end)-parseTime(d.shift.start)-totalBreak)/60);
-          label=`${d.shift.start}–${d.shift.end}`;
-          meta=`${netHrs.toFixed(1)} hrs · ${totalBreak}min break`;
-        }
-        if (d.isToday) bdr='#534AB7';
-        return `<div class="card list-card" style="${bdr?`border-color:${bdr};`:''}${bg?`background:${bg};`:''}${d.isToday?'border-width:2px;':''}" >
-          <div style="display:flex;gap:14px;align-items:flex-start;width:100%">
-            <div style="min-width:44px;text-align:center;flex-shrink:0">
-              <div style="font-size:.62rem;font-weight:700;letter-spacing:.07em;color:#98988f">${esc(dow)}</div>
-              <div style="font-family:'DM Serif Display',Georgia,serif;font-size:1.8rem;line-height:1;margin-top:2px;color:${d.isToday?'#534AB7':'#181816'}">${num}</div>
-            </div>
-            <div style="flex:1">
-              <div class="list-title">${esc(label)}</div>
-              ${meta?`<div class="list-copy">${esc(meta)}</div>`:''}
-              ${d.shift&&d.isToday?`<button class="btn btn-secondary btn-sm" style="margin-top:8px;font-size:.78rem" onclick="openLate()">⏱ Running late?</button>`:''}
-            </div>
+    ${days.map(d=>{
+      const dObj = new Date(d.ds+'T00:00:00');
+      const dow  = dObj.toLocaleDateString('en-AU',{weekday:'long'});
+      const date = dObj.toLocaleDateString('en-AU',{day:'numeric',month:'short'});
+      const isToday = d.isToday;
+
+      // ── My shift block ──────────────────────────────────────
+      let myLabel='Off', myMeta='', myBdr='', myBg='';
+      if (d.mySick) {
+        myLabel='Sick day'; myBdr='rgba(163,45,45,.3)'; myBg='rgba(163,45,45,.04)';
+      } else if (d.myLeave) {
+        myLabel=d.myLeave.type; myBdr='rgba(15,110,86,.2)'; myBg='rgba(15,110,86,.04)';
+      } else if (d.myShift) {
+        const gH=(parseTime(d.myShift.end)-parseTime(d.myShift.start))/60;
+        const brk=gH>8?50:gH>=8?40:30;
+        const netH=Math.max(0,gH-brk/60);
+        myLabel=`${d.myShift.start} – ${d.myShift.end}`;
+        myMeta=`${Math.max(0,(parseTime(d.myShift.end)-parseTime(d.myShift.start)-brk)/60).toFixed(1)} hrs · ${brk}min break`;
+      }
+      if (isToday) { myBdr='#534AB7'; }
+
+      // ── Team for this day ───────────────────────────────────
+      const teamShifts = allShifts.filter(s=>s.date===d.ds&&s.empId!==emp.id);
+      const teamRows = teamShifts.map(s=>{
+        const col     = allStaff.find(x=>x.id===s.empId);
+        if (!col) return '';
+        const isSick  = allSick.some(sk=>sk.empId===col.id&&sk.date===d.ds);
+        const onLeave = allLeaves.find(l=>l.empId===col.id&&l.from<=d.ds&&l.to>=d.ds);
+        const ini     = ((col.first||'')[0]||'')+((col.last||'')[0]||'');
+        const gH2     = (parseTime(s.end)-parseTime(s.start))/60;
+        const brk2    = gH2>8?50:gH2>=8?40:30;
+        const netH2   = Math.max(0,(parseTime(s.end)-parseTime(s.start)-brk2)/60);
+
+        const badge = isSick
+          ? `<span style="font-size:.72rem;background:#FCEBEB;color:#791F1F;padding:1px 7px;border-radius:10px;font-weight:600;white-space:nowrap">🤒 Sick</span>`
+          : onLeave
+          ? `<span style="font-size:.72rem;background:#FAEEDA;color:#633806;padding:1px 7px;border-radius:10px;font-weight:600;white-space:nowrap">🏖 ${esc(onLeave.type.replace(' Leave','').replace(' leave',''))}</span>`
+          : '';
+
+        const timeStr = isSick||onLeave
+          ? `<span style="text-decoration:line-through;opacity:.45">${esc(s.start)}–${esc(s.end)}</span>`
+          : `${esc(s.start)}–${esc(s.end)} · ${netH2.toFixed(1)}h`;
+
+        return `<div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid rgba(24,24,22,.05)">
+          <div style="width:28px;height:28px;border-radius:50%;background:${col.color||'#eee'}22;color:${col.color||'#534AB7'};display:flex;align-items:center;justify-content:center;font-size:.72rem;font-weight:700;flex-shrink:0">${esc(ini)}</div>
+          <div style="flex:1;min-width:0">
+            <div style="font-size:.85rem;font-weight:600;color:#181816">${esc(col.first)} ${esc(col.last)}</div>
+            <div style="font-size:.78rem;color:#58584e">${timeStr}</div>
           </div>
+          ${badge}
         </div>`;
-      }).join('')}
-    </div>
+      }).join('');
+
+      // Also include colleagues on leave with no shift
+      const leaveOnlyRows = allLeaves.filter(l=>{
+        if(l.empId===emp.id) return false;
+        if(l.from>d.ds||l.to<d.ds) return false;
+        // Only show if they don't have a shift (already shown above)
+        return !teamShifts.some(s=>s.empId===l.empId);
+      }).map(l=>{
+        const col = allStaff.find(x=>x.id===l.empId);
+        if(!col) return '';
+        const ini = ((col.first||'')[0]||'')+((col.last||'')[0]||'');
+        return `<div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid rgba(24,24,22,.05)">
+          <div style="width:28px;height:28px;border-radius:50%;background:${col.color||'#eee'}22;color:${col.color||'#534AB7'};display:flex;align-items:center;justify-content:center;font-size:.72rem;font-weight:700;flex-shrink:0">${esc(ini)}</div>
+          <div style="flex:1">
+            <div style="font-size:.85rem;font-weight:600;color:#181816">${esc(col.first)} ${esc(col.last)}</div>
+          </div>
+          <span style="font-size:.72rem;background:#FAEEDA;color:#633806;padding:1px 7px;border-radius:10px;font-weight:600">${esc(l.type.replace(' Leave',''))}</span>
+        </div>`;
+      }).join('');
+
+      const hasTeam = teamRows||leaveOnlyRows;
+      const teamHTML = hasTeam ? `
+        <div style="margin-top:10px;padding-top:8px;border-top:1px solid rgba(24,24,22,.08)">
+          <div style="font-size:.7rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#98988f;margin-bottom:4px">Also on this day</div>
+          ${teamRows}${leaveOnlyRows}
+        </div>` : '';
+
+      return `<div class="card" style="padding:14px 16px;${myBdr?`border-color:${myBdr};`:''}${myBg?`background:${myBg};`:''}${isToday?'border-width:2px;':''}margin-bottom:10px">
+        <div style="display:flex;gap:14px;align-items:flex-start">
+          <div style="min-width:44px;text-align:center;flex-shrink:0">
+            <div style="font-size:.62rem;font-weight:700;letter-spacing:.07em;color:#98988f">${dow.slice(0,3).toUpperCase()}</div>
+            <div style="font-family:'DM Serif Display',Georgia,serif;font-size:1.8rem;line-height:1;margin-top:2px;color:${isToday?'#534AB7':'#181816'}">${dObj.getDate()}</div>
+            <div style="font-size:.65rem;color:#98988f">${date}</div>
+          </div>
+          <div style="flex:1;min-width:0">
+            <div style="font-weight:600;font-size:.95rem;color:#181816">${esc(myLabel)}</div>
+            ${myMeta?`<div style="font-size:.82rem;color:#58584e;margin-top:2px">${esc(myMeta)}</div>`:''}
+            ${d.myShift&&isToday?`<button class="btn btn-secondary btn-sm" style="margin-top:8px;font-size:.78rem" onclick="openLate()">⏱ Running late?</button>`:''}
+            ${teamHTML}
+          </div>
+        </div>
+      </div>`;
+    }).join('')}
     <div id="late-wrap"></div>`;
 }
 
-window.rNav = function(d) { state.weekOffset+=d; renderRoster(); };
+window.rNav = function(d) {
+  if(d===0){ state.weekOffset=0; }
+  else { state.weekOffset+=d; }
+  renderRoster();
+};
 
 window.openLate = function() {
   // Remove any existing modal

@@ -55,15 +55,30 @@ function addDays(iso,n) {
 function getList(key) {
   try {
     const arr = JSON.parse(state.allData['rx3_'+key]||'[]');
-    // Clean any date/time fields that Google Sheets may have mangled
-    // Sheets converts "09:00" to a Date object which serialises as full datetime
     if (key === 'shifts') {
       arr.forEach(s => {
-        // Fix start/end: extract HH:MM if it's a full date string
+        // Clean Sheets-mangled date/time fields
         if (s.start && s.start.length > 5) s.start = cleanTime_(s.start);
         if (s.end   && s.end.length   > 5) s.end   = cleanTime_(s.end);
-        // Fix date: extract YYYY-MM-DD if it's a full date string
-        if (s.date  && s.date.length  > 10) s.date  = cleanDate_(s.date);
+        if (s.date  && s.date.length  > 10) s.date = cleanDate_(s.date);
+        // Normalise published to boolean
+        if (s.published === 'true' || s.published === 1) s.published = true;
+        if (s.published === 'false' || s.published === 0 || s.published === undefined) s.published = !!s.published;
+      });
+    }
+    if (key === 'sickDays') {
+      arr.forEach(s => { if (s.date && s.date.length > 10) s.date = cleanDate_(s.date); });
+    }
+    if (key === 'leaveRequests') {
+      arr.forEach(l => {
+        if (l.from && l.from.length > 10) l.from = cleanDate_(l.from);
+        if (l.to   && l.to.length   > 10) l.to   = cleanDate_(l.to);
+      });
+    }
+    if (key === 'clockEvents') {
+      arr.forEach(e => {
+        if (e.date && e.date.length > 10) e.date = cleanDate_(e.date);
+        if (e.time && e.time.length > 5)  e.time = cleanTime_(e.time);
       });
     }
     return arr;
@@ -655,18 +670,10 @@ function renderRoster() {
   const we       = addDays(ws,6);
   const td       = today();
 
-  // Own shifts
   const myShifts = getList('shifts').filter(s=>s.empId===emp.id&&s.published);
   const mySick   = getList('sickDays').filter(s=>s.empId===emp.id);
   const myLeaves = getList('leaveRequests').filter(l=>l.empId===emp.id&&l.status==='approved');
-
-  // All team data
-  const allStaff   = getList('staff');
-  const allShifts  = getList('shifts').filter(s=>s.published);
-  const allSick    = getList('sickDays');
-  const allLeaves  = getList('leaveRequests').filter(l=>l.status==='approved');
-
-  const wkTot = myShifts.filter(s=>s.date>=ws&&s.date<=we).reduce((t,s)=>t+shiftHrs(s),0);
+  const wkTot    = myShifts.filter(s=>s.date>=ws&&s.date<=we).reduce((t,s)=>t+shiftHrs(s),0);
 
   const days = Array.from({length:7},(_,i)=>{
     const ds = addDays(ws,i);
@@ -684,113 +691,171 @@ function renderRoster() {
       <h1 class="page-title">Roster</h1>
       <div class="page-subtitle">${esc(FDS(ws))} – ${esc(FDS(we))} · ${wkTot.toFixed(1)} hrs this week</div>
       <div class="btn-row" style="margin-top:12px">
-        <button class="btn btn-secondary btn-sm" onclick="rNav(-1)">‹ Previous</button>
+        <button class="btn btn-secondary btn-sm" onclick="rNav(-1)">‹ Prev</button>
         <button class="btn btn-secondary btn-sm" onclick="rNav(0)">Today</button>
         <button class="btn btn-secondary btn-sm" onclick="rNav(1)">Next ›</button>
       </div>
     </div>
-    ${days.map(d=>{
-      const dObj = new Date(d.ds+'T00:00:00');
-      const dow  = dObj.toLocaleDateString('en-AU',{weekday:'long'});
-      const date = dObj.toLocaleDateString('en-AU',{day:'numeric',month:'short'});
-      const isToday = d.isToday;
+    <div style="font-size:.75rem;color:#98988f;margin-bottom:10px;padding:0 2px">Tap any day to see the full team roster</div>
+    <div class="info-grid">
+      ${days.map(d=>{
+        const dObj = new Date(d.ds+'T00:00:00');
+        const dow  = dObj.toLocaleDateString('en-AU',{weekday:'short'}).toUpperCase();
+        const num  = dObj.getDate();
+        const mon  = dObj.toLocaleDateString('en-AU',{month:'short'});
 
-      // ── My shift block ──────────────────────────────────────
-      let myLabel='Off', myMeta='', myBdr='', myBg='';
-      if (d.mySick) {
-        myLabel='Sick day'; myBdr='rgba(163,45,45,.3)'; myBg='rgba(163,45,45,.04)';
-      } else if (d.myLeave) {
-        myLabel=d.myLeave.type; myBdr='rgba(15,110,86,.2)'; myBg='rgba(15,110,86,.04)';
-      } else if (d.myShift) {
-        const gH=(parseTime(d.myShift.end)-parseTime(d.myShift.start))/60;
-        const brk=gH>8?50:gH>=8?40:30;
-        const netH=Math.max(0,gH-brk/60);
-        myLabel=`${d.myShift.start} – ${d.myShift.end}`;
-        myMeta=`${Math.max(0,(parseTime(d.myShift.end)-parseTime(d.myShift.start)-brk)/60).toFixed(1)} hrs · ${brk}min break`;
-      }
-      if (isToday) { myBdr='#534AB7'; }
+        let myStatus='Off', myTime='', chipStyle='';
+        if (d.mySick) {
+          myStatus='Sick'; chipStyle='background:#FCEBEB;color:#791F1F;';
+        } else if (d.myLeave) {
+          myStatus=d.myLeave.type.replace(' Leave',''); chipStyle='background:#FAEEDA;color:#633806;';
+        } else if (d.myShift) {
+          const gH=(parseTime(d.myShift.end)-parseTime(d.myShift.start))/60;
+          const brk=gH>8?50:gH>=8?40:30;
+          myStatus=`${d.myShift.start}–${d.myShift.end}`;
+          myTime=Math.max(0,gH-brk/60).toFixed(1)+'h';
+          chipStyle='background:#EEEDFE;color:#534AB7;';
+        }
 
-      // ── Team for this day ───────────────────────────────────
-      const teamShifts = allShifts.filter(s=>s.date===d.ds&&s.empId!==emp.id);
-      const teamRows = teamShifts.map(s=>{
-        const col     = allStaff.find(x=>x.id===s.empId);
-        if (!col) return '';
-        const isSick  = allSick.some(sk=>sk.empId===col.id&&sk.date===d.ds);
-        const onLeave = allLeaves.find(l=>l.empId===col.id&&l.from<=d.ds&&l.to>=d.ds);
-        const ini     = ((col.first||'')[0]||'')+((col.last||'')[0]||'');
-        const gH2     = (parseTime(s.end)-parseTime(s.start))/60;
-        const brk2    = gH2>8?50:gH2>=8?40:30;
-        const netH2   = Math.max(0,(parseTime(s.end)-parseTime(s.start)-brk2)/60);
+        // Count total staff on this day (for the badge)
+        const allShiftsDay = getList('shifts').filter(s=>s.date===d.ds&&s.published);
+        const allLeaveDay  = getList('leaveRequests').filter(l=>l.status==='approved'&&l.from<=d.ds&&l.to>=d.ds);
+        const teamCount    = new Set([...allShiftsDay.map(s=>s.empId),...allLeaveDay.map(l=>l.empId)]).size;
 
-        const badge = isSick
-          ? `<span style="font-size:.72rem;background:#FCEBEB;color:#791F1F;padding:1px 7px;border-radius:10px;font-weight:600;white-space:nowrap">🤒 Sick</span>`
-          : onLeave
-          ? `<span style="font-size:.72rem;background:#FAEEDA;color:#633806;padding:1px 7px;border-radius:10px;font-weight:600;white-space:nowrap">🏖 ${esc(onLeave.type.replace(' Leave','').replace(' leave',''))}</span>`
-          : '';
+        const todayRing = d.isToday ? 'border:2px solid #534AB7;' : 'border:1px solid rgba(24,24,22,.09);';
 
-        const timeStr = isSick||onLeave
-          ? `<span style="text-decoration:line-through;opacity:.45">${esc(s.start)}–${esc(s.end)}</span>`
-          : `${esc(s.start)}–${esc(s.end)} · ${netH2.toFixed(1)}h`;
-
-        return `<div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid rgba(24,24,22,.05)">
-          <div style="width:28px;height:28px;border-radius:50%;background:${col.color||'#eee'}22;color:${col.color||'#534AB7'};display:flex;align-items:center;justify-content:center;font-size:.72rem;font-weight:700;flex-shrink:0">${esc(ini)}</div>
-          <div style="flex:1;min-width:0">
-            <div style="font-size:.85rem;font-weight:600;color:#181816">${esc(col.first)} ${esc(col.last)}</div>
-            <div style="font-size:.78rem;color:#58584e">${timeStr}</div>
+        return `<div class="card" style="${todayRing}cursor:pointer;padding:14px 16px;margin-bottom:8px;-webkit-tap-highlight-color:transparent"
+          onclick="openDayRoster('${d.ds}')">
+          <div style="display:flex;align-items:center;gap:14px">
+            <!-- Date column -->
+            <div style="min-width:40px;text-align:center;flex-shrink:0">
+              <div style="font-size:.6rem;font-weight:700;letter-spacing:.07em;color:${d.isToday?'#534AB7':'#98988f'}">${dow}</div>
+              <div style="font-family:'DM Serif Display',Georgia,serif;font-size:1.75rem;line-height:1;color:${d.isToday?'#534AB7':'#181816'}">${num}</div>
+              <div style="font-size:.65rem;color:#98988f">${mon}</div>
+            </div>
+            <!-- My status -->
+            <div style="flex:1;min-width:0">
+              ${chipStyle?`<span style="font-size:.78rem;font-weight:600;padding:2px 9px;border-radius:12px;${chipStyle}">${esc(myStatus)}</span>`:`<span style="font-size:.82rem;color:#98988f">Off</span>`}
+              ${myTime?`<span style="font-size:.75rem;color:#58584e;margin-left:6px">${myTime}</span>`:''}
+              ${d.myShift&&d.isToday?`<div style="margin-top:6px"><button class="btn btn-secondary btn-sm" style="font-size:.75rem" onclick="event.stopPropagation();openLate()">⏱ Running late?</button></div>`:''}
+            </div>
+            <!-- Team count badge + chevron -->
+            <div style="display:flex;align-items:center;gap:8px;flex-shrink:0">
+              ${teamCount>0?`<span style="font-size:.75rem;font-weight:700;background:var(--s2);color:#58584e;padding:2px 8px;border-radius:10px">${teamCount} on shift</span>`:''}
+              <span style="color:#98988f;font-size:1.1rem">›</span>
+            </div>
           </div>
-          ${badge}
         </div>`;
-      }).join('');
-
-      // Also include colleagues on leave with no shift
-      const leaveOnlyRows = allLeaves.filter(l=>{
-        if(l.empId===emp.id) return false;
-        if(l.from>d.ds||l.to<d.ds) return false;
-        // Only show if they don't have a shift (already shown above)
-        return !teamShifts.some(s=>s.empId===l.empId);
-      }).map(l=>{
-        const col = allStaff.find(x=>x.id===l.empId);
-        if(!col) return '';
-        const ini = ((col.first||'')[0]||'')+((col.last||'')[0]||'');
-        return `<div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid rgba(24,24,22,.05)">
-          <div style="width:28px;height:28px;border-radius:50%;background:${col.color||'#eee'}22;color:${col.color||'#534AB7'};display:flex;align-items:center;justify-content:center;font-size:.72rem;font-weight:700;flex-shrink:0">${esc(ini)}</div>
-          <div style="flex:1">
-            <div style="font-size:.85rem;font-weight:600;color:#181816">${esc(col.first)} ${esc(col.last)}</div>
-          </div>
-          <span style="font-size:.72rem;background:#FAEEDA;color:#633806;padding:1px 7px;border-radius:10px;font-weight:600">${esc(l.type.replace(' Leave',''))}</span>
-        </div>`;
-      }).join('');
-
-      const hasTeam = teamRows||leaveOnlyRows;
-      const teamHTML = hasTeam ? `
-        <div style="margin-top:10px;padding-top:8px;border-top:1px solid rgba(24,24,22,.08)">
-          <div style="font-size:.7rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#98988f;margin-bottom:4px">Also on this day</div>
-          ${teamRows}${leaveOnlyRows}
-        </div>` : '';
-
-      return `<div class="card" style="padding:14px 16px;${myBdr?`border-color:${myBdr};`:''}${myBg?`background:${myBg};`:''}${isToday?'border-width:2px;':''}margin-bottom:10px">
-        <div style="display:flex;gap:14px;align-items:flex-start">
-          <div style="min-width:44px;text-align:center;flex-shrink:0">
-            <div style="font-size:.62rem;font-weight:700;letter-spacing:.07em;color:#98988f">${dow.slice(0,3).toUpperCase()}</div>
-            <div style="font-family:'DM Serif Display',Georgia,serif;font-size:1.8rem;line-height:1;margin-top:2px;color:${isToday?'#534AB7':'#181816'}">${dObj.getDate()}</div>
-            <div style="font-size:.65rem;color:#98988f">${date}</div>
-          </div>
-          <div style="flex:1;min-width:0">
-            <div style="font-weight:600;font-size:.95rem;color:#181816">${esc(myLabel)}</div>
-            ${myMeta?`<div style="font-size:.82rem;color:#58584e;margin-top:2px">${esc(myMeta)}</div>`:''}
-            ${d.myShift&&isToday?`<button class="btn btn-secondary btn-sm" style="margin-top:8px;font-size:.78rem" onclick="openLate()">⏱ Running late?</button>`:''}
-            ${teamHTML}
-          </div>
-        </div>
-      </div>`;
-    }).join('')}
+      }).join('')}
+    </div>
     <div id="late-wrap"></div>`;
 }
 
 window.rNav = function(d) {
-  if(d===0){ state.weekOffset=0; }
-  else { state.weekOffset+=d; }
+  if(d===0){ state.weekOffset=0; } else { state.weekOffset+=d; }
   renderRoster();
+};
+
+// ── DAY ROSTER POPUP ───────────────────────────────────────────
+window.openDayRoster = function(ds) {
+  const existing = qs('#day-roster-popup');
+  if (existing) existing.remove();
+
+  const allStaff  = getList('staff').sort((a,b)=>(a.first||'').localeCompare(b.first||''));
+  // published may be boolean true, string "true", or 1 — accept all
+  const isPublished = s => s.published===true||s.published==='true'||s.published===1;
+  const allShifts = getList('shifts').filter(s=>{
+    const d = cleanDate_(s.date||'');
+    return d===ds && isPublished(s);
+  });
+  const allSick   = getList('sickDays').filter(s=>cleanDate_(s.date||'')===ds);
+  const allLeaves = getList('leaveRequests').filter(l=>l.status==='approved'&&l.from<=ds&&l.to>=ds);
+
+  const dObj    = new Date(ds+'T00:00:00');
+  const dayFull = dObj.toLocaleDateString('en-AU',{weekday:'long',day:'numeric',month:'long',year:'numeric'});
+  const isToday = ds===today();
+
+  // Build unified team list: staff with shifts + staff on leave (no shift)
+  const seen = {};
+  const rows = [];
+
+  // Staff with shifts first (sorted by start time)
+  allShifts.slice().sort((a,b)=>a.start.localeCompare(b.start)).forEach(s=>{
+    const col     = allStaff.find(x=>x.id===s.empId);
+    if (!col) return;
+    seen[s.empId] = true;
+    const isSick  = allSick.some(sk=>sk.empId===s.empId);
+    const onLeave = allLeaves.find(l=>l.empId===s.empId);
+    const gH      = (parseTime(s.end)-parseTime(s.start))/60;
+    const brk     = gH>8?50:gH>=8?40:30;
+    const netH    = Math.max(0,gH-brk/60).toFixed(1);
+    const ini     = ((col.first||'')[0]||'')+((col.last||'')[0]||'');
+    rows.push({col, s, isSick, onLeave, netH, ini, type:'shift'});
+  });
+
+  // Then leave-only (no shift that day)
+  allLeaves.forEach(l=>{
+    if (seen[l.empId]) return;
+    const col = allStaff.find(x=>x.id===l.empId);
+    if (!col) return;
+    const ini = ((col.first||'')[0]||'')+((col.last||'')[0]||'');
+    rows.push({col, s:null, isSick:false, onLeave:l, netH:'0', ini, type:'leave'});
+  });
+
+  const rowsHTML = rows.length ? rows.map(r=>{
+    const badge = r.isSick
+      ? `<span style="font-size:.72rem;background:#FCEBEB;color:#791F1F;padding:2px 9px;border-radius:10px;font-weight:600;flex-shrink:0">🤒 Sick</span>`
+      : r.onLeave
+      ? `<span style="font-size:.72rem;background:#FAEEDA;color:#633806;padding:2px 9px;border-radius:10px;font-weight:600;flex-shrink:0">🏖 ${esc((r.onLeave.type||'').replace(' Leave',''))}</span>`
+      : '';
+
+    const timeRow = r.type==='leave'
+      ? `<div style="font-size:.78rem;color:#58584e">On leave all day</div>`
+      : r.isSick||r.onLeave
+      ? `<div style="font-size:.78rem;color:#58584e;text-decoration:line-through;opacity:.5">${esc(r.s.start)} – ${esc(r.s.end)}</div>`
+      : `<div style="font-size:.78rem;color:#58584e">${esc(r.s.start)} – ${esc(r.s.end)} · ${r.netH}h</div>`;
+
+    return `<div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid rgba(24,24,22,.06)">
+      <div style="width:36px;height:36px;border-radius:50%;background:${r.col.color||'#534AB7'}22;color:${r.col.color||'#534AB7'};display:flex;align-items:center;justify-content:center;font-size:.78rem;font-weight:700;flex-shrink:0">${esc(r.ini)}</div>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:.9rem;font-weight:600;color:#181816">${esc(r.col.first)} ${esc(r.col.last)}</div>
+        <div style="font-size:.72rem;color:#98988f">${esc(r.col.role||'')}</div>
+        ${timeRow}
+      </div>
+      ${badge}
+    </div>`;
+  }).join('') : `<div style="padding:24px 0;text-align:center;color:#98988f;font-size:.9rem">No shifts scheduled for this day.</div>`;
+
+  const popup = document.createElement('div');
+  popup.id = 'day-roster-popup';
+  popup.style.cssText = 'position:fixed;inset:0;z-index:500;display:flex;align-items:flex-end;justify-content:center;background:rgba(0,0,0,.45);backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px)';
+
+  popup.innerHTML = `
+    <div style="width:100%;max-width:520px;background:#fff;border-radius:22px 22px 0 0;max-height:85vh;display:flex;flex-direction:column;animation:slideUp .28s cubic-bezier(.22,1,.36,1)">
+      <!-- Handle -->
+      <div style="padding:12px 0 0;text-align:center;flex-shrink:0">
+        <div style="width:36px;height:4px;background:rgba(24,24,22,.15);border-radius:2px;margin:0 auto"></div>
+      </div>
+      <!-- Header -->
+      <div style="padding:16px 20px 12px;border-bottom:1px solid rgba(24,24,22,.08);flex-shrink:0;display:flex;align-items:flex-start;justify-content:space-between">
+        <div>
+          <div style="font-size:1.1rem;font-weight:700;color:#181816">${esc(dayFull)}</div>
+          <div style="font-size:.82rem;color:#98988f;margin-top:2px">${rows.length} staff scheduled</div>
+        </div>
+        <button onclick="document.getElementById('day-roster-popup').remove()" style="width:32px;height:32px;border-radius:50%;background:rgba(24,24,22,.07);border:none;font-size:16px;cursor:pointer;color:#58584e;flex-shrink:0">✕</button>
+      </div>
+      <!-- Team list -->
+      <div style="overflow-y:auto;padding:0 20px;flex:1">
+        ${rowsHTML}
+      </div>
+      <!-- Close button -->
+      <div style="padding:16px 20px calc(16px + env(safe-area-inset-bottom,0px));flex-shrink:0;border-top:1px solid rgba(24,24,22,.06)">
+        <button onclick="document.getElementById('day-roster-popup').remove()" class="btn btn-secondary" style="width:100%">Close</button>
+      </div>
+    </div>`;
+
+  popup.addEventListener('click', e=>{ if(e.target===popup) popup.remove(); });
+  document.body.appendChild(popup);
 };
 
 window.openLate = function() {

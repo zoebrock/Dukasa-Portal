@@ -552,7 +552,7 @@ function renderHome() {
   qs('#view-home').innerHTML=`
     <div class="page-header">
       <div>
-        <h1 class="page-title">Hello, ${esc((emp.first&&!emp.first.includes('T'))?emp.first:emp.last||'there')}! 👋</h1>
+        <h1 class="page-title">Hello, ${esc(emp.first || emp.last || 'there')}! 👋</h1>
         <div class="page-subtitle" id="home-date">${now.toLocaleDateString('en-AU',{weekday:'long',day:'numeric',month:'long'})}</div>
       </div>
       <div class="hero-time">
@@ -1518,23 +1518,24 @@ function showLoading() {
 
 // ── INIT ───────────────────────────────────────────────────────
 async function init() {
-  const sx=trySession();
+  // Always clear any stale cached data first
+  state.allData = {};
+  const sx = trySession();
   if (sx) {
     showLoading();
     try {
-      const r=await gasGet('getAll');
-      if(!r.ok) throw new Error(r.error||'Failed');
-      state.allData=r.data||{};
-      // Match by id first, fall back to email (handles id changes after data recovery)
-      let emp=getList('staff').find(s=>s.id===sx.id);
-      if(!emp && sx.email) emp=getList('staff').find(s=>(s.email||'').toLowerCase()===sx.email.toLowerCase());
-      if(emp){
-        // Update stored session with current id
-        state.emp=emp;
-        localStorage.setItem('dukasa_sx',JSON.stringify({id:emp.id,email:emp.email,ts:Date.now(),v:CONFIG.SESSION_VERSION}));
-        buildApp(); return;
+      const r = await gasGet('getAll');
+      if (!r.ok) throw new Error(r.error||'Failed');
+      state.allData = r.data||{};
+      // Match by email (resilient across id changes)
+      let emp = getList('staff').find(s=>(s.email||'').toLowerCase()===sx.email?.toLowerCase());
+      if (emp) {
+        state.emp = emp;
+        localStorage.setItem('dukasa_sx', JSON.stringify({id:emp.id, email:emp.email, ts:Date.now(), v:CONFIG.SESSION_VERSION}));
+        buildApp();
+        return;
       }
-    } catch(e){ console.warn('Session restore failed:',e.message); }
+    } catch(e) { console.warn('Session restore failed:', e.message); }
     localStorage.removeItem('dukasa_sx');
   }
   showLogin();

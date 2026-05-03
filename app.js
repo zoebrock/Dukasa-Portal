@@ -52,7 +52,42 @@ function addDays(iso,n) {
   const d = new Date(iso+'T00:00:00'); d.setDate(d.getDate()+n);
   return localISO(d);
 }
-function getList(key) { try { return JSON.parse(state.allData['rx3_'+key]||'[]'); } catch(e){ return []; } }
+function getList(key) {
+  try {
+    const arr = JSON.parse(state.allData['rx3_'+key]||'[]');
+    // Clean any date/time fields that Google Sheets may have mangled
+    // Sheets converts "09:00" to a Date object which serialises as full datetime
+    if (key === 'shifts') {
+      arr.forEach(s => {
+        // Fix start/end: extract HH:MM if it's a full date string
+        if (s.start && s.start.length > 5) s.start = cleanTime_(s.start);
+        if (s.end   && s.end.length   > 5) s.end   = cleanTime_(s.end);
+        // Fix date: extract YYYY-MM-DD if it's a full date string
+        if (s.date  && s.date.length  > 10) s.date  = cleanDate_(s.date);
+      });
+    }
+    return arr;
+  } catch(e){ return []; }
+}
+
+function cleanTime_(str) {
+  // Extract HH:MM from any date string e.g. "Sat Dec 30 1899 09:00:00 GMT+1000..."
+  if (!str) return str;
+  const m = String(str).match(/(\d{1,2}):(\d{2})/);
+  if (m) return String(m[1]).padStart(2,'0')+':'+m[2];
+  return str;
+}
+
+function cleanDate_(str) {
+  // Extract YYYY-MM-DD from any date string
+  if (!str) return str;
+  const m = String(str).match(/(\d{4})-(\d{2})-(\d{2})/);
+  if (m) return m[1]+'-'+m[2]+'-'+m[3];
+  // Try to parse as date and convert
+  const d = new Date(str);
+  if (!isNaN(d.getTime())) return localISO(d);
+  return str;
+}
 function initials(e) { return ((e.first||'')[0]||'')+((e.last||'')[0]||''); }
 
 // ── TOAST ──────────────────────────────────────────────────────

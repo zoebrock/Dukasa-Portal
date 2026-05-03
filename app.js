@@ -352,6 +352,15 @@ function renderAll() {
 // ── HOME ───────────────────────────────────────────────────────
 function renderHome() {
   const emp      = state.emp;
+  // DEBUG — remove after fix
+  console.log('renderHome: emp.id='+emp.id+' emp.first='+emp.first+' emp.email='+emp.email);
+  const allShiftRaw = getList('shifts');
+  console.log('Total shifts from server: '+allShiftRaw.length);
+  const myRaw = allShiftRaw.filter(s=>s.empId===emp.id);
+  console.log('My shifts (by empId): '+myRaw.length);
+  const myPub = myRaw.filter(s=>s.published);
+  console.log('My published shifts: '+myPub.length);
+  if(myPub.length>0) console.log('Sample: '+JSON.stringify(myPub[0]));
   const shifts   = getList('shifts').filter(s=>s.empId===emp.id&&s.published);
   const sick     = getList('sickDays').filter(s=>s.empId===emp.id);
   const leaves   = getList('leaveRequests').filter(l=>l.empId===emp.id);

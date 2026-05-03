@@ -56,23 +56,17 @@ function getList(key) {
   try {
     const arr = JSON.parse(state.allData['rx3_'+key]||'[]');
     if (key === 'staff') {
-      // Filter out invalid records and ensure all fields have safe defaults
       return arr.filter(s=>s&&s.id&&(s.email||s.first||s.last)).map(s=>({
         ...s,
-        first: s.first||'',
-        last:  s.last||'',
-        email: s.email||'',
-        role:  s.role||'',
-        pin:   s.pin||'',
-        color: s.color||'#534AB7'
+        first: s.first||'', last: s.last||'', email: s.email||'',
+        role: s.role||'', pin: s.pin||'', color: s.color||'#534AB7'
       }));
     }
+    if (key === 'shifts') {
       arr.forEach(s => {
-        // Clean Sheets-mangled date/time fields
         if (s.start && s.start.length > 5) s.start = cleanTime_(s.start);
         if (s.end   && s.end.length   > 5) s.end   = cleanTime_(s.end);
         if (s.date  && s.date.length  > 10) s.date = cleanDate_(s.date);
-        // Normalise published to boolean
         if (s.published === 'true' || s.published === 1) s.published = true;
         if (s.published === 'false' || s.published === 0 || s.published === undefined) s.published = !!s.published;
       });

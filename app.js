@@ -261,6 +261,8 @@ async function doLogin() {
 
     state.emp = empByEmail;
     localStorage.setItem('dukasa_sx', JSON.stringify({id:empByEmail.id, email:empByEmail.email, ts:Date.now()}));
+    // Also store email as primary key for resilience across id changes
+
     buildApp();
   } catch(e) { showLogin('Could not connect: '+e.message); }
 }
@@ -548,7 +550,7 @@ function renderHome() {
   qs('#view-home').innerHTML=`
     <div class="page-header">
       <div>
-        <h1 class="page-title">Hello, ${esc(emp.first)}! 👋</h1>
+        <h1 class="page-title">Hello, ${esc((emp.first&&!emp.first.includes('T'))?emp.first:emp.last||'there')}! 👋</h1>
         <div class="page-subtitle" id="home-date">${now.toLocaleDateString('en-AU',{weekday:'long',day:'numeric',month:'long'})}</div>
       </div>
       <div class="hero-time">
@@ -1521,8 +1523,15 @@ async function init() {
       const r=await gasGet('getAll');
       if(!r.ok) throw new Error(r.error||'Failed');
       state.allData=r.data||{};
-      const emp=getList('staff').find(s=>s.id===sx.id&&(s.email||'').toLowerCase()===sx.email?.toLowerCase());
-      if(emp){ state.emp=emp; buildApp(); return; }
+      // Match by id first, fall back to email (handles id changes after data recovery)
+      let emp=getList('staff').find(s=>s.id===sx.id);
+      if(!emp && sx.email) emp=getList('staff').find(s=>(s.email||'').toLowerCase()===sx.email.toLowerCase());
+      if(emp){
+        // Update stored session with current id
+        state.emp=emp;
+        localStorage.setItem('dukasa_sx',JSON.stringify({id:emp.id,email:emp.email,ts:Date.now()}));
+        buildApp(); return;
+      }
     } catch(e){ console.warn('Session restore failed:',e.message); }
     localStorage.removeItem('dukasa_sx');
   }

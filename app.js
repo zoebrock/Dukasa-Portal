@@ -3,7 +3,7 @@
 //  Live data via /api/gas proxy → Google Apps Script
 // ============================================================
 
-const CONFIG = { PROXY: '/api/gas', SESSION_VERSION: 2 };
+const CONFIG = { PROXY: '/api/gas', SESSION_VERSION: 3 };
 
 const state = {
   currentView: 'home',
@@ -1518,7 +1518,6 @@ function showLoading() {
 
 // ── INIT ───────────────────────────────────────────────────────
 async function init() {
-  // Always clear any stale cached data first
   state.allData = {};
   const sx = trySession();
   if (sx) {
@@ -1527,11 +1526,15 @@ async function init() {
       const r = await gasGet('getAll');
       if (!r.ok) throw new Error(r.error||'Failed');
       state.allData = r.data||{};
-      // Match by email (resilient across id changes)
-      let emp = getList('staff').find(s=>(s.email||'').toLowerCase()===sx.email?.toLowerCase());
+      // Always match by email — most reliable across id changes
+      const email = (sx.email||'').toLowerCase();
+      const emp = email ? getList('staff').find(s=>(s.email||'').toLowerCase()===email) : null;
       if (emp) {
         state.emp = emp;
-        localStorage.setItem('dukasa_sx', JSON.stringify({id:emp.id, email:emp.email, ts:Date.now(), v:CONFIG.SESSION_VERSION}));
+        // Always update session with current id and email
+        localStorage.setItem('dukasa_sx', JSON.stringify({
+          id: emp.id, email: emp.email, ts: Date.now(), v: CONFIG.SESSION_VERSION
+        }));
         buildApp();
         return;
       }

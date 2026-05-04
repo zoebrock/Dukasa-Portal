@@ -231,11 +231,51 @@ async function gasPost(body = {}) {
 
 async function saveList(key, arr) {
   state.allData['rx3_' + key] = JSON.stringify(arr);
-  return gasPost({
-    action: 'set',
-    dataKey: 'rx3_' + key,
-    value: JSON.stringify(arr)
+
+  const tableMap = {
+    staff: 'staff',
+    shifts: 'shifts',
+    clockEvents: 'clock_events',
+    leaveRequests: 'leave_requests'
+  };
+
+  const table = tableMap[key];
+  if (!table) return;
+
+  // Clear existing data
+  await supabase.from(table).delete().neq('id', '');
+
+  const mapped = arr.map(item => {
+    const copy = { ...item };
+
+    if (key === 'shifts') {
+      copy.emp_id = copy.empId;
+      copy.break_min = copy.breakMin;
+      copy.is_ot = copy.isOT;
+      copy.ot_id = copy.otId;
+      delete copy.empId;
+      delete copy.breakMin;
+      delete copy.isOT;
+      delete copy.otId;
+    }
+
+    if (key === 'clockEvents') {
+      copy.emp_id = copy.empId;
+      copy.timestamp = copy.ts;
+      delete copy.empId;
+      delete copy.ts;
+    }
+
+    if (key === 'leaveRequests') {
+      copy.emp_id = copy.empId;
+      delete copy.empId;
+    }
+
+    return copy;
   });
+
+  const { error } = await supabase.from(table).insert(mapped);
+  if (error) throw new Error(error.message);
 }
 
 // ── AUTH ───────────────────────────────────────────────────────

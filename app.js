@@ -127,28 +127,53 @@ function toast(msg, type='info', dur=3500) {
 }
 
 // ── API ────────────────────────────────────────────────────────
-async function gasGet(action, params={}) {
-  const url = new URL(CONFIG.GAS_URL);
+async function gasGet(action, params = {}) {
+  const url = new URL(CONFIG.GAS_URL, window.location.origin);
   url.searchParams.set('action', action);
-  url.searchParams.set('key', CONFIG.API_KEY);
-  Object.entries(params).forEach(([k,v])=>url.searchParams.set(k,v));
-  const res  = await fetch(url.toString());
-  const text = await res.text();
-  try { return JSON.parse(text); } catch(e) { throw new Error('Bad response: ' + text.slice(0,200)); }
-}
-async function gasPost(body) {
-  // GAS does not support CORS preflight — send as text/plain to skip OPTIONS
-  const res  = await fetch(CONFIG.GAS_URL, {
-    method: 'POST',
-    headers: {'Content-Type': 'text/plain'},
-    body: JSON.stringify({...body, key: CONFIG.API_KEY})
+
+  Object.entries(params).forEach(([k, v]) => {
+    if (v !== undefined && v !== null) {
+      url.searchParams.set(k, String(v));
+    }
   });
+
+  const res = await fetch(url.toString(), {
+    method: 'GET',
+    headers: { Accept: 'application/json' }
+  });
+
   const text = await res.text();
-  try { return JSON.parse(text); } catch(e) { return {ok:false,error:text.slice(0,100)}; }
+
+  try {
+    return JSON.parse(text);
+  } catch (e) {
+    throw new Error('Bad response: ' + text.slice(0, 200));
+  }
 }
+
+async function gasPost(body = {}) {
+  const res = await fetch(CONFIG.GAS_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+
+  const text = await res.text();
+
+  try {
+    return JSON.parse(text);
+  } catch (e) {
+    return { ok: false, error: text.slice(0, 200) };
+  }
+}
+
 async function saveList(key, arr) {
-  state.allData['rx3_'+key] = JSON.stringify(arr);
-  return gasPost({action:'set', dataKey:'rx3_'+key, value:JSON.stringify(arr)});
+  state.allData['rx3_' + key] = JSON.stringify(arr);
+  return gasPost({
+    action: 'set',
+    dataKey: 'rx3_' + key,
+    value: JSON.stringify(arr)
+  });
 }
 
 // ── AUTH ───────────────────────────────────────────────────────

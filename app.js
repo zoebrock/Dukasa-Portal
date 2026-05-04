@@ -127,9 +127,10 @@ function toast(msg, type='info', dur=3500) {
 }
 
 // ── API ────────────────────────────────────────────────────────
-async function gasGet(action, params = {}) {
+function gasUrl(action, params = {}) {
   const url = new URL(CONFIG.GAS_URL, window.location.origin);
-  url.searchParams.set('action', action);
+
+  if (action) url.searchParams.set('action', action);
 
   Object.entries(params).forEach(([k, v]) => {
     if (v !== undefined && v !== null) {
@@ -137,34 +138,46 @@ async function gasGet(action, params = {}) {
     }
   });
 
-  const res = await fetch(url.toString(), {
-    method: 'GET',
-    headers: { Accept: 'application/json' }
-  });
+  url.searchParams.set('_', String(Date.now()));
+  return url.toString();
+}
 
+async function parseGasResponse(res) {
   const text = await res.text();
 
   try {
     return JSON.parse(text);
-  } catch (e) {
-    throw new Error('Bad response: ' + text.slice(0, 200));
+  } catch {
+    throw new Error('Bad response from backend: ' + text.slice(0, 200));
   }
 }
 
-async function gasPost(body = {}) {
-  const res = await fetch(CONFIG.GAS_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body)
+async function gasGet(action, params = {}) {
+  const res = await fetch(gasUrl(action, params), {
+    method: 'GET',
+    headers: { Accept: 'application/json' },
+    cache: 'no-store'
   });
 
-  const text = await res.text();
+  const json = await parseGasResponse(res);
+  if (!res.ok) throw new Error(json.error || 'Backend request failed');
+  return json;
+}
 
-  try {
-    return JSON.parse(text);
-  } catch (e) {
-    return { ok: false, error: text.slice(0, 200) };
-  }
+async function gasPost(body = {}) {
+  const res = await fetch(gasUrl(), {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'application/json'
+    },
+    body: JSON.stringify(body || {}),
+    cache: 'no-store'
+  });
+
+  const json = await parseGasResponse(res);
+  if (!res.ok) throw new Error(json.error || 'Backend request failed');
+  return json;
 }
 
 async function saveList(key, arr) {

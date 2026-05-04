@@ -1616,7 +1616,7 @@ async function init() {
   if (sx) {
     showLoading();
     try {
-      const r = await gasGet('getAll');
+      const r = await getAllData();
       if (!r.ok) throw new Error(r.error||'Failed');
       state.allData = r.data||{};
       // Always match by email — most reliable across id changes
@@ -1645,3 +1645,5 @@ window.onerror = function(msg, src, line, col, err) {
 };
 
 init();
+
+window.doLogin = doLogin;

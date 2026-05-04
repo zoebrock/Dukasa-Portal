@@ -6,7 +6,7 @@
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm';
 
 const supabase = createClient(
-  'https://jfdovkvmmqlebranlggf.supabase.co',
+  'https://jfowikvmnqlebranlggf.supabase.co',
   'sb_publishable_-x_b0RnXfUjoKML_cRYvjA_r2udt8PQ'
 );
 

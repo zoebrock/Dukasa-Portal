@@ -34,13 +34,32 @@ async function getAllData() {
   if (clockEvents.error) throw new Error(clockEvents.error.message);
   if (leaveRequests.error) throw new Error(leaveRequests.error.message);
 
+  const mappedShifts = (shifts.data || []).map(s => ({
+    ...s,
+    empId: s.emp_id,
+    breakMin: s.break_min,
+    isOT: s.is_ot,
+    otId: s.ot_id
+  }));
+
+  const mappedClockEvents = (clockEvents.data || []).map(e => ({
+    ...e,
+    empId: e.emp_id,
+    ts: e.timestamp
+  }));
+
+  const mappedLeaveRequests = (leaveRequests.data || []).map(l => ({
+    ...l,
+    empId: l.emp_id
+  }));
+
   return {
     ok: true,
     data: {
       rx3_staff: JSON.stringify(staff.data || []),
-      rx3_shifts: JSON.stringify(shifts.data || []),
-      rx3_clockEvents: JSON.stringify(clockEvents.data || []),
-      rx3_leaveRequests: JSON.stringify(leaveRequests.data || [])
+      rx3_shifts: JSON.stringify(mappedShifts),
+      rx3_clockEvents: JSON.stringify(mappedClockEvents),
+      rx3_leaveRequests: JSON.stringify(mappedLeaveRequests)
     }
   };
 }

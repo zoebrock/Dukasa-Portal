@@ -3,6 +3,13 @@
 //  Live data via /api/gas proxy → Google Apps Script
 // ============================================================
 
+import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm';
+
+const supabase = createClient(
+  'https://jfdovkvmmqlebranlggf.supabase.co',
+  'sb_publishable_-x_b0RnXfUjoKML_cRYvjA_r2udt8PQ'
+);
+
 const CONFIG = {
   GAS_URL: '/api/gas',
   SESSION_VERSION: 3
@@ -14,6 +21,29 @@ const state = {
   allData: {},
   weekOffset: 0,
 };
+async function getAllData() {
+  const [staff, shifts, clockEvents, leaveRequests] = await Promise.all([
+    supabase.from('staff').select('*'),
+    supabase.from('shifts').select('*'),
+    supabase.from('clock_events').select('*'),
+    supabase.from('leave_requests').select('*')
+  ]);
+
+  if (staff.error) throw new Error(staff.error.message);
+  if (shifts.error) throw new Error(shifts.error.message);
+  if (clockEvents.error) throw new Error(clockEvents.error.message);
+  if (leaveRequests.error) throw new Error(leaveRequests.error.message);
+
+  return {
+    ok: true,
+    data: {
+      rx3_staff: JSON.stringify(staff.data || []),
+      rx3_shifts: JSON.stringify(shifts.data || []),
+      rx3_clockEvents: JSON.stringify(clockEvents.data || []),
+      rx3_leaveRequests: JSON.stringify(leaveRequests.data || [])
+    }
+  };
+}
 
 // ── UTILS ─────────────────────────────────────────────────────
 const qs  = (s, r = document) => r.querySelector(s);
@@ -287,7 +317,7 @@ async function doLogin() {
   if (!email) { showLogin('Please enter your email address.'); return; }
   if (btn) { btn.textContent='Signing in…'; btn.disabled=true; }
   try {
-    const res = await gasGet('getAll');
+    const res = await getAllData();
     if (!res.ok) throw new Error(res.error||'Could not load data');
     state.allData = res.data||{};
     const staffArr = getList('staff');

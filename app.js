@@ -3,7 +3,11 @@
 //  Live data via /api/gas proxy → Google Apps Script
 // ============================================================
 
-const CONFIG = { PROXY: '/api/gas', SESSION_VERSION: 3 };
+const CONFIG = {
+  GAS_URL: 'https://script.google.com/macros/s/AKfycbw5PFfwBTMpR7cVJUtoqMzn7DHc5E9CUgqZ-6N2x4-J4_6InOJGVbRQMbPoDlf89uXp5w/exec',
+  API_KEY: '181049d1-b062-448a-a267-64824f1ef054',
+  SESSION_VERSION: 3
+};
 
 const state = {
   currentView: 'home',
@@ -125,15 +129,21 @@ function toast(msg, type='info', dur=3500) {
 
 // ── API ────────────────────────────────────────────────────────
 async function gasGet(action, params={}) {
-  const url = new URL(CONFIG.PROXY, window.location.origin);
+  const url = new URL(CONFIG.GAS_URL);
   url.searchParams.set('action', action);
+  url.searchParams.set('key', CONFIG.API_KEY);
   Object.entries(params).forEach(([k,v])=>url.searchParams.set(k,v));
   const res  = await fetch(url.toString());
   const text = await res.text();
-  try { return JSON.parse(text); } catch(e) { throw new Error('Bad response from server'); }
+  try { return JSON.parse(text); } catch(e) { throw new Error('Bad response: ' + text.slice(0,200)); }
 }
 async function gasPost(body) {
-  const res  = await fetch(CONFIG.PROXY, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  // GAS does not support CORS preflight — send as text/plain to skip OPTIONS
+  const res  = await fetch(CONFIG.GAS_URL, {
+    method: 'POST',
+    headers: {'Content-Type': 'text/plain'},
+    body: JSON.stringify({...body, key: CONFIG.API_KEY})
+  });
   const text = await res.text();
   try { return JSON.parse(text); } catch(e) { return {ok:false,error:text.slice(0,100)}; }
 }
@@ -1506,7 +1516,14 @@ async function startSync() {
       if(ts!==_lm){
         _lm=ts;
         const r=await gasGet('getAll');
-        if(r.ok){ state.allData=r.data||{}; const f=getList('staff').find(s=>s.id===state.emp.id); if(f) state.emp=f; renderAll(); }
+        if(r.ok){
+          state.allData=r.data||{};
+          // Match by email — resilient across id changes
+          const email=(state.emp?.email||'').toLowerCase();
+          const f=email?getList('staff').find(s=>(s.email||'').toLowerCase()===email):null;
+          if(f) state.emp=f;
+          renderAll();
+        }
       }
     }catch(e){}
   },10000);

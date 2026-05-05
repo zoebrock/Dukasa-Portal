@@ -1469,7 +1469,7 @@ window.changePin = async function() {
 
   if(btn){btn.textContent='Saving…';btn.disabled=true;}
   try {
-    const res = await gasGet('getAll');
+    const res = await getAllData();
     if(!res.ok) throw new Error(res.error||'Could not load data');
     state.allData = res.data||{};
     const staffArr = getList('staff');
@@ -1540,7 +1540,7 @@ function initPullToRefresh() {
         document.head.appendChild(s);
       }
       try {
-        const res = await gasGet('getAll');
+        const res = await getAllData();
         if (res.ok) {
           state.allData = res.data || {};
           const fresh = getList('staff').find(s => s.id === state.emp.id);
@@ -1635,21 +1635,15 @@ function tickOnce() {
 // ── SYNC ───────────────────────────────────────────────────────
 let _lm='0';
 async function startSync() {
-  try { _lm=(await gasGet('ping')).lastModified||'0'; } catch(e){}
   setInterval(async()=>{
     try {
-      const ts=(await gasGet('ping')).lastModified||'0';
-      if(ts!==_lm){
-        _lm=ts;
-        const r=await gasGet('getAll');
-        if(r.ok){
-          state.allData=r.data||{};
-          // Match by email — resilient across id changes
-          const email=(state.emp?.email||'').toLowerCase();
-          const f=email?getList('staff').find(s=>(s.email||'').toLowerCase()===email):null;
-          if(f) state.emp=f;
-          renderAll();
-        }
+      const r = await getAllData();
+      if(r.ok){
+        state.allData = r.data||{};
+        const email=(state.emp?.email||'').toLowerCase();
+        const f=email?getList('staff').find(s=>(s.email||'').toLowerCase()===email):null;
+        if(f) state.emp=f;
+        renderAll();
       }
     }catch(e){}
   },10000);

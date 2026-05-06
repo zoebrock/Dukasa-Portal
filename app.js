@@ -1292,80 +1292,42 @@ window.submitMC = async function() {
 
 // ── OT ─────────────────────────────────────────────────────────
 function renderOT() {
-  const emp  = state.emp;
-  const reqs = getList('otRequests').filter(o=>o.empId===emp.id).sort((a,b)=>(b.date||"").localeCompare(a.date||""));
+  const emp = state.emp;
+  const reqs = getList('otRequests')
+    .filter(o => o.empId === emp.id)
+    .sort((a,b) => (b.date || "").localeCompare(a.date || ""));
+
   const badge = o => {
-    if(o.approved===true)  return `<span class="badge badge-green">Approved</span>`;
-    if(o.approved===false) return `<span class="badge badge-red">Denied</span>`;
+    if (o.approved === true) return `<span class="badge badge-green">Approved</span>`;
+    if (o.approved === false) return `<span class="badge badge-red">Denied</span>`;
     return `<span class="badge badge-amber">Pending</span>`;
   };
 
-  // Manager-requested OT awaiting staff response
-  // Show if: requested by manager AND approved is null AND staff hasn't responded yet
-  const needsResponse = reqs.filter(o=>
-    o.requestedBy==='manager' &&
-    (o.approved===null || o.approved===undefined) &&
-    o.staffConfirmed!==true &&
-    o.staffConfirmed!==false
-  );
-
-  qs('#view-ot').innerHTML=`
+  qs('#view-ot').innerHTML = `
     <div class="page-header">
-      <div><h1 class="page-title">Overtime</h1><div class="page-subtitle">Submit and review overtime requests.</div></div>
-      <button class="btn btn-primary" onclick="openOTForm()">+ Request OT</button>
+      <div>
+        <h1 class="page-title">Overtime</h1>
+        <div class="page-subtitle">Submit and review overtime requests.</div>
+      </div>
+      <button class="btn btn-primary" type="button" onclick="openOTForm()">+ Request OT</button>
     </div>
+
     <div id="ot-form"></div>
 
-    ${needsResponse.length ? `
-      <div class="section-label" style="color:#BA7517">⏰ Action required — manager OT request</div>
-      <div class="info-grid" style="margin-bottom:20px">
-        ${needsResponse.map(o=>`
-          <div class="card" style="border-color:rgba(186,117,23,.35);background:rgba(186,117,23,.05)">
-            <div class="list-title">${esc(FDOW(o.date))}, ${esc(FDS(o.date))}</div>
-            <div class="list-copy" style="margin-top:2px">${esc(o.start)} – ${esc(o.end)}</div>
-            ${o.reason?`<div class="list-copy" style="margin-top:5px;font-style:italic">"${esc(o.reason)}"</div>`:''}
-            <div class="btn-row" style="margin-top:12px">
-              <button class="btn btn-primary" style="flex:1;background:#0F6E56;box-shadow:0 4px 12px rgba(15,110,86,.25)" onclick="respondManagerOT('${o.id}',true)">✓ Accept</button>
-              <button class="btn btn-secondary" style="flex:1;color:#A32D2D;border-color:rgba(163,45,45,.3)" onclick="respondManagerOT('${o.id}',false)">✕ Decline</button>
-            </div>
-          </div>`).join('')}
-      </div>
-    ` : ''}
-
-    <div class="section-label">All OT requests</div>
+    <div class="section-label">My OT requests</div>
     <div class="info-grid">
-      ${reqs.length?reqs.map(o=>`
+      ${reqs.length ? reqs.map(o => `
         <div class="card list-card">
           <div>
-            <div class="list-title">${esc(FDOW(o.date))}, ${esc(FDS(o.date))}</div>
-            <div class="list-copy">${esc(o.start)} – ${esc(o.end)}</div>
-            ${o.requestedBy==='manager'?`<div class="list-copy" style="font-size:.75rem;color:#534AB7;margin-top:2px">Requested by manager</div>`:''}
+            <div class="list-title">${esc(FDS(o.date))} · ${esc(o.start || '')} – ${esc(o.end || '')}</div>
+            ${o.reason ? `<div class="list-copy">${esc(o.reason)}</div>` : ''}
           </div>
-          <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px">
-            ${badge(o)}
-            ${o.requestedBy==='manager'&&o.staffConfirmed===true?`<span style="font-size:.72rem;color:#0F6E56">✓ You accepted</span>`:''}
-            ${o.requestedBy==='manager'&&o.staffConfirmed===false?`<span style="font-size:.72rem;color:#A32D2D">✕ You declined</span>`:''}
-          </div>
-        </div>`).join(''):'<div class="helper-note">No OT requests yet.</div>'}
-    </div>`;
+          ${badge(o)}
+        </div>
+      `).join('') : '<div class="helper-note">No OT requests yet.</div>'}
+    </div>
+  `;
 }
-
-window.respondManagerOT = async function(otId, accepted) {
-  const reqs = getList('otRequests');
-  const idx  = reqs.findIndex(o=>o.id===otId);
-  if(idx<0) return;
-  reqs[idx].staffConfirmed = accepted;
-  try {
-    await saveList('otRequests', reqs);
-    await gasPost({action:'sendEmail', fn:'sendOTStaffResponse', payload:{
-      otId, empId: state.emp.id,
-      date: reqs[idx].date, start: reqs[idx].start, end: reqs[idx].end,
-      accepted
-    }});
-    renderOT();
-    toast(accepted ? 'OT accepted — manager notified ✓' : 'OT declined — manager notified', accepted ? 'success' : 'info');
-  } catch(e) { toast('Could not respond — please try again.', 'error'); }
-};
 
 window.openOTForm = function() {
   const c = qs('#ot-form');
@@ -1450,16 +1412,10 @@ window.submitOT = async function() {
 
     if (error) throw error;
 
-    await gasPost({
+    gasPost({
       action: 'sendEmail',
       fn: 'sendOTRequestNotification',
-      payload: {
-        empId: state.emp.id,
-        date,
-        start,
-        end,
-        reason
-      }
+      payload: { empId: state.emp.id, date, start, end, reason }
     }).catch(err => console.warn('OT email failed:', err));
 
     const fresh = await getAllData();
@@ -1472,16 +1428,13 @@ window.submitOT = async function() {
 
   } catch (e) {
     console.error('OT submit failed:', e);
-
     if (btn) {
       btn.disabled = false;
       btn.textContent = 'Submit';
     }
-
     toast('Could not submit OT: ' + e.message, 'error', 5000);
   }
 };
-
 // ── HOURS ──────────────────────────────────────────────────────
 function renderHours() {
   const emp    = state.emp;

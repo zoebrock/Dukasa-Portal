@@ -1700,22 +1700,44 @@ function tickOnce() {
 }
 
 // ── SYNC ───────────────────────────────────────────────────────
-let _lm='0';
-async function startSync() {
-  setInterval(async()=>{
-    try {
-      const r = await getAllData();
-      if(r.ok){
-        state.allData = r.data||{};
-        const email=(state.emp?.email||'').toLowerCase();
-        const f=email?getList('staff').find(s=>(s.email||'').toLowerCase()===email):null;
-        if(f) state.emp=f;
-        renderAll();
-      }
-    }catch(e){}
-  },10000);
-}
+let _lm = '0';
 
+async function startSync() {
+  setInterval(async () => {
+    try {
+      // Do not refresh/re-render while a form is open
+      const formOpen =
+        qs('#ot-form')?.innerHTML.trim() ||
+        qs('#lv-form')?.innerHTML.trim() ||
+        qs('#late-modal');
+
+      if (formOpen) return;
+
+      const r = await getAllData();
+
+      if (r.ok) {
+        state.allData = r.data || {};
+
+        const email = (state.emp?.email || '').toLowerCase();
+        const f = email
+          ? getList('staff').find(s => (s.email || '').toLowerCase() === email)
+          : null;
+
+        if (f) state.emp = f;
+
+        // Only re-render the current view, not the whole app
+        if (state.currentView === 'home') renderHome();
+        if (state.currentView === 'roster') renderRoster();
+        if (state.currentView === 'leave') renderLeave();
+        if (state.currentView === 'ot') renderOT();
+        if (state.currentView === 'hours') renderHours();
+        if (state.currentView === 'profile') renderProfile();
+      }
+    } catch (e) {
+      console.warn('Background sync failed:', e.message);
+    }
+  }, 30000);
+}
 // ── LOADING ────────────────────────────────────────────────────
 function showLoading() {
   document.body.innerHTML=`

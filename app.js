@@ -1355,29 +1355,53 @@ window.respondManagerOT = async function(otId, accepted) {
 };
 
 window.openOTForm = function() {
-  const c=qs('#ot-form'); if(!c) return;
-  c.innerHTML=`
+  const c = qs('#ot-form');
+  if (!c) return;
+
+  c.innerHTML = `
     <div class="card" style="margin-bottom:14px">
       <div style="font-family:'DM Serif Display',Georgia,serif;font-size:1.3rem;margin-bottom:16px">New overtime request</div>
+
       <div class="form-grid">
-        <div class="input-wrap"><label>Date</label><input class="input" id="ot-d" type="date"></div>
-        <div class="input-wrap"><label>From</label><input class="input" id="ot-s" type="time"></div>
-        <div class="input-wrap"><label>To</label><input class="input" id="ot-e" type="time"></div>
-        <div class="input-wrap full-span"><label>Reason</label><textarea class="textarea" id="ot-r" placeholder="Why is OT needed?"></textarea></div>
-        <div id="ot-err" style="display:none;color:#A32D2D;font-size:.82rem" class="full-span">⚠ Please fill in date and times.</div>
+        <div class="input-wrap">
+          <label for="ot-date">Date</label>
+          <input class="input" id="ot-date" type="date" autocomplete="off">
+        </div>
+
+        <div class="input-wrap">
+          <label for="ot-start">From</label>
+          <input class="input" id="ot-start" type="time" autocomplete="off">
+        </div>
+
+        <div class="input-wrap">
+          <label for="ot-end">To</label>
+          <input class="input" id="ot-end" type="time" autocomplete="off">
+        </div>
+
+        <div class="input-wrap full-span">
+          <label for="ot-reason">Reason</label>
+          <textarea class="textarea" id="ot-reason" placeholder="Why is OT needed?"></textarea>
+        </div>
+
+        <div id="ot-err" style="display:none;color:#A32D2D;font-size:.82rem" class="full-span">
+          ⚠ Please fill in date and times.
+        </div>
+
         <div class="btn-row full-span">
-          <button class="btn btn-secondary" onclick="qs('#ot-form').innerHTML=''">Cancel</button>
-          <button class="btn btn-primary" id="ot-submit" onclick="submitOT()">Submit</button>
+          <button type="button" class="btn btn-secondary" onclick="qs('#ot-form').innerHTML=''">Cancel</button>
+          <button type="button" class="btn btn-primary" id="ot-submit" onclick="submitOT()">Submit</button>
         </div>
       </div>
-    </div>`;
+    </div>
+  `;
 };
 
 window.submitOT = async function() {
-  const date = qs('#ot-d')?.value;
-  const start = qs('#ot-s')?.value;
-  const end = qs('#ot-e')?.value;
-  const reason = (qs('#ot-r')?.value || '').trim();
+  const date = qs('#ot-date')?.value || '';
+  const start = qs('#ot-start')?.value || '';
+  const end = qs('#ot-end')?.value || '';
+  const reason = (qs('#ot-reason')?.value || '').trim();
+
   const errEl = qs('#ot-err');
   const btn = qs('#ot-submit');
 
@@ -1387,7 +1411,10 @@ window.submitOT = async function() {
   }
 
   if (errEl) errEl.style.display = 'none';
-  if (btn) { btn.disabled = true; btn.textContent = 'Submitting…'; }
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Submitting…';
+  }
 
   const row = {
     id: 'ot' + Date.now(),
@@ -1422,14 +1449,22 @@ window.submitOT = async function() {
       }
     }).catch(err => console.warn('OT email failed:', err));
 
-    await getAllData().then(res => { state.allData = res.data || {}; });
+    const fresh = await getAllData();
+    state.allData = fresh.data || {};
 
     if (qs('#ot-form')) qs('#ot-form').innerHTML = '';
     renderOT();
+
     toast('OT request submitted! Your manager has been notified. ✓', 'success', 5000);
 
   } catch (e) {
-    if (btn) { btn.disabled = false; btn.textContent = 'Submit'; }
+    console.error('OT submit failed:', e);
+
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = 'Submit';
+    }
+
     toast('Could not submit OT: ' + e.message, 'error', 5000);
   }
 };

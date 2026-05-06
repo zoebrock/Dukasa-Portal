@@ -248,63 +248,76 @@ async function gasPost(body = {}) {
 async function saveList(key, arr) {
   state.allData['rx3_' + key] = JSON.stringify(arr);
 
-const tableMap = {
-  staff: 'staff',
-  shifts: 'shifts',
-  clockEvents: 'clock_events',
-  leaveRequests: 'leave_requests',
-  otRequests: 'ot_requests'
-};
+  const tableMap = {
+    staff: 'staff',
+    shifts: 'shifts',
+    clockEvents: 'clock_events',
+    leaveRequests: 'leave_requests',
+    otRequests: 'ot_requests'
+  };
 
   const table = tableMap[key];
   if (!table) return;
 
-  // Clear existing data
-  await supabase.from(table).delete().neq('id', '');
+  const mapped = arr.map(item => {
+    const copy = { ...item };
 
-const mapped = arr.map(item => {
-  const copy = { ...item };
+    if (key === 'shifts') {
+      copy.emp_id = copy.empId;
+      copy.break_min = copy.breakMin;
+      copy.is_ot = copy.isOT;
+      copy.ot_id = copy.otId;
 
-  if (key === 'shifts') {
-    copy.emp_id = copy.empId;
-    copy.break_min = copy.breakMin;
-    copy.is_ot = copy.isOT;
-    copy.ot_id = copy.otId;
+      delete copy.empId;
+      delete copy.breakMin;
+      delete copy.isOT;
+      delete copy.otId;
+    }
 
-    delete copy.empId;
-    delete copy.breakMin;
-    delete copy.isOT;
-    delete copy.otId;
+    if (key === 'clockEvents') {
+      copy.emp_id = copy.empId;
+      copy.timestamp = copy.ts;
+
+      delete copy.empId;
+      delete copy.ts;
+    }
+
+    if (key === 'leaveRequests') {
+      copy.emp_id = copy.empId;
+      delete copy.empId;
+    }
+
+    if (key === 'otRequests') {
+      copy.emp_id = copy.empId;
+      copy.requested_by = copy.requestedBy;
+      copy.staff_read = copy.staffRead;
+      copy.avail_confirmed = copy.availConfirmed;
+
+      delete copy.empId;
+      delete copy.requestedBy;
+      delete copy.staffRead;
+      delete copy.availConfirmed;
+    }
+
+    return copy;
+  });
+
+  // Replace table contents safely
+  const { error: deleteError } = await supabase
+    .from(table)
+    .delete()
+    .neq('id', '');
+
+  if (deleteError) throw new Error(deleteError.message);
+
+  if (mapped.length) {
+    const { error: insertError } = await supabase
+      .from(table)
+      .insert(mapped);
+
+    if (insertError) throw new Error(insertError.message);
   }
-
-  if (key === 'clockEvents') {
-    copy.emp_id = copy.empId;
-    copy.timestamp = copy.ts;
-
-    delete copy.empId;
-    delete copy.ts;
-  }
-
-  if (key === 'leaveRequests') {
-    copy.emp_id = copy.empId;
-
-    delete copy.empId;
-  }
-
-  if (key === 'otRequests') {
-    copy.emp_id = copy.empId;
-    copy.requested_by = copy.requestedBy;
-    copy.staff_read = copy.staffRead;
-    copy.avail_confirmed = copy.availConfirmed;
-
-    delete copy.empId;
-    delete copy.requestedBy;
-    delete copy.staffRead;
-    delete copy.availConfirmed;
-  }
-
-  return copy;
-});
+}
 
 // ── AUTH ───────────────────────────────────────────────────────
 function showLogin(err='') {

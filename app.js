@@ -1811,6 +1811,8 @@ window.onerror = function(msg, src, line, col, err) {
   return true;
 };
 
-init();
-
 window.doLogin = doLogin;
+window.doSetPin = doSetPin;
+window.signOut = signOut;
+
+init();

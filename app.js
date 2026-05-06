@@ -22,17 +22,22 @@ const state = {
   weekOffset: 0,
 };
 async function getAllData() {
-  const [staff, shifts, clockEvents, leaveRequests] = await Promise.all([
+  const [staff, shifts, clockEvents, leaveRequests, otRequests] = await Promise.all([
     supabase.from('staff').select('*'),
     supabase.from('shifts').select('*'),
     supabase.from('clock_events').select('*'),
-    supabase.from('leave_requests').select('*')
+    supabase.from('leave_requests').select('*'),
+    supabase.from('ot_requests').select('*')
   ]);
 
+  // Error handling
   if (staff.error) throw new Error(staff.error.message);
   if (shifts.error) throw new Error(shifts.error.message);
   if (clockEvents.error) throw new Error(clockEvents.error.message);
   if (leaveRequests.error) throw new Error(leaveRequests.error.message);
+  if (otRequests.error) throw new Error(otRequests.error.message);
+
+  // ── MAPPINGS ─────────────────────────────────────
 
   const mappedShifts = (shifts.data || []).map(s => ({
     ...s,
@@ -53,13 +58,24 @@ async function getAllData() {
     empId: l.emp_id
   }));
 
+  const mappedOTRequests = (otRequests.data || []).map(o => ({
+    ...o,
+    empId: o.emp_id,
+    requestedBy: o.requested_by,
+    staffRead: o.staff_read,
+    availConfirmed: o.avail_confirmed
+  }));
+
+  // ── RETURN STRUCTURE ─────────────────────────────
+
   return {
     ok: true,
     data: {
       rx3_staff: JSON.stringify(staff.data || []),
       rx3_shifts: JSON.stringify(mappedShifts),
       rx3_clockEvents: JSON.stringify(mappedClockEvents),
-      rx3_leaveRequests: JSON.stringify(mappedLeaveRequests)
+      rx3_leaveRequests: JSON.stringify(mappedLeaveRequests),
+      rx3_otRequests: JSON.stringify(mappedOTRequests)
     }
   };
 }
@@ -232,12 +248,13 @@ async function gasPost(body = {}) {
 async function saveList(key, arr) {
   state.allData['rx3_' + key] = JSON.stringify(arr);
 
-  const tableMap = {
-    staff: 'staff',
-    shifts: 'shifts',
-    clockEvents: 'clock_events',
-    leaveRequests: 'leave_requests'
-  };
+const tableMap = {
+  staff: 'staff',
+  shifts: 'shifts',
+  clockEvents: 'clock_events',
+  leaveRequests: 'leave_requests',
+  otRequests: 'ot_requests'
+};
 
   const table = tableMap[key];
   if (!table) return;
@@ -245,38 +262,49 @@ async function saveList(key, arr) {
   // Clear existing data
   await supabase.from(table).delete().neq('id', '');
 
-  const mapped = arr.map(item => {
-    const copy = { ...item };
+const mapped = arr.map(item => {
+  const copy = { ...item };
 
-    if (key === 'shifts') {
-      copy.emp_id = copy.empId;
-      copy.break_min = copy.breakMin;
-      copy.is_ot = copy.isOT;
-      copy.ot_id = copy.otId;
-      delete copy.empId;
-      delete copy.breakMin;
-      delete copy.isOT;
-      delete copy.otId;
-    }
+  if (key === 'shifts') {
+    copy.emp_id = copy.empId;
+    copy.break_min = copy.breakMin;
+    copy.is_ot = copy.isOT;
+    copy.ot_id = copy.otId;
 
-    if (key === 'clockEvents') {
-      copy.emp_id = copy.empId;
-      copy.timestamp = copy.ts;
-      delete copy.empId;
-      delete copy.ts;
-    }
+    delete copy.empId;
+    delete copy.breakMin;
+    delete copy.isOT;
+    delete copy.otId;
+  }
 
-    if (key === 'leaveRequests') {
-      copy.emp_id = copy.empId;
-      delete copy.empId;
-    }
+  if (key === 'clockEvents') {
+    copy.emp_id = copy.empId;
+    copy.timestamp = copy.ts;
 
-    return copy;
-  });
+    delete copy.empId;
+    delete copy.ts;
+  }
 
-  const { error } = await supabase.from(table).insert(mapped);
-  if (error) throw new Error(error.message);
-}
+  if (key === 'leaveRequests') {
+    copy.emp_id = copy.empId;
+
+    delete copy.empId;
+  }
+
+  if (key === 'otRequests') {
+    copy.emp_id = copy.empId;
+    copy.requested_by = copy.requestedBy;
+    copy.staff_read = copy.staffRead;
+    copy.avail_confirmed = copy.availConfirmed;
+
+    delete copy.empId;
+    delete copy.requestedBy;
+    delete copy.staffRead;
+    delete copy.availConfirmed;
+  }
+
+  return copy;
+});
 
 // ── AUTH ───────────────────────────────────────────────────────
 function showLogin(err='') {
@@ -1346,25 +1374,63 @@ window.openOTForm = function() {
 };
 
 window.submitOT = async function() {
-  const date=qs('#ot-d')?.value, start=qs('#ot-s')?.value, end=qs('#ot-e')?.value, reason=(qs('#ot-r')?.value||'').trim();
-  const errEl=qs('#ot-err');
-  const btn=qs('#ot-submit');
-  if(!date||!start||!end){if(errEl)errEl.style.display='block';return;}
-  if(errEl)errEl.style.display='none';
-  if(btn){btn.disabled=true;btn.textContent='Submitting...';}
-  const reqs=getList('otRequests');
-  reqs.push({id:'ot'+Date.now(),empId:state.emp.id,date,start,end,reason,approved:null,requestedBy:'staff',submitted:new Date().toISOString()});
-  try{
-    await saveList('otRequests',reqs);
-    // Fire email without awaiting — don't block UI on email delivery
-    gasPost({action:'sendEmail',fn:'sendOTRequestNotification',payload:{empId:state.emp.id,date,start,end,reason}})
-      .catch(err=>console.warn('OT email failed (non-critical):',err));
-    if(qs('#ot-form')) qs('#ot-form').innerHTML='';
+  const date = qs('#ot-d')?.value;
+  const start = qs('#ot-s')?.value;
+  const end = qs('#ot-e')?.value;
+  const reason = (qs('#ot-r')?.value || '').trim();
+  const errEl = qs('#ot-err');
+  const btn = qs('#ot-submit');
+
+  if (!date || !start || !end) {
+    if (errEl) errEl.style.display = 'block';
+    return;
+  }
+
+  if (errEl) errEl.style.display = 'none';
+  if (btn) { btn.disabled = true; btn.textContent = 'Submitting…'; }
+
+  const row = {
+    id: 'ot' + Date.now(),
+    emp_id: state.emp.id,
+    date,
+    start,
+    end,
+    reason,
+    approved: null,
+    requested_by: 'staff',
+    submitted: new Date().toISOString(),
+    staff_read: false,
+    avail_confirmed: true
+  };
+
+  try {
+    const { error } = await supabase
+      .from('ot_requests')
+      .insert([row]);
+
+    if (error) throw error;
+
+    await gasPost({
+      action: 'sendEmail',
+      fn: 'sendOTRequestNotification',
+      payload: {
+        empId: state.emp.id,
+        date,
+        start,
+        end,
+        reason
+      }
+    }).catch(err => console.warn('OT email failed:', err));
+
+    await getAllData().then(res => { state.allData = res.data || {}; });
+
+    if (qs('#ot-form')) qs('#ot-form').innerHTML = '';
     renderOT();
-    toast('OT request submitted! Your manager has been notified. ✓','success',5000);
-  }catch(e){
-    if(btn){btn.disabled=false;btn.textContent='Submit';}
-    toast('Could not submit — please try again.','error');
+    toast('OT request submitted! Your manager has been notified. ✓', 'success', 5000);
+
+  } catch (e) {
+    if (btn) { btn.disabled = false; btn.textContent = 'Submit'; }
+    toast('Could not submit OT: ' + e.message, 'error', 5000);
   }
 };
 

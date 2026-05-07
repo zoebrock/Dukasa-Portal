@@ -595,27 +595,104 @@ function renderHome() {
   // Build break history lines for display
   const breakHistory = breakSessions.filter(s=>s.end).map(s=>`${s.start.time}–${s.end.time}`).join(', ');
 
-  // Build the banner — shown when on break OR when there are completed breaks (to show remaining)
-  let breakBanner = '';
-  if (onBreak && activeBreak) {
-    const bs = activeBreak.start;
-    // Construct ISO timestamp: prefer ts field, fall back to date+time
-    const startIso = bs.ts || (bs.date && bs.time ? bs.date + 'T' + bs.time + ':00' : null);
-    const startTimeLabel = bs.time || '';
-    breakBanner = `
-    <div id="break-timer-banner" data-start="${startIso||''}" data-total="${remainingMins}" style="background:#FAEEDA;border-radius:var(--r);padding:14px 16px;margin-bottom:12px;border:1.5px solid rgba(186,117,23,.35)">
-      <div style="font-size:.7rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#854F0B;margin-bottom:5px">☕ On break${startTimeLabel ? ' · started ' + startTimeLabel : ''}</div>
-      <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:5px">
-        <div id="break-elapsed" style="font-size:2.2rem;font-weight:500;letter-spacing:-.03em;color:#181816;font-variant-numeric:tabular-nums">00:00</div>
-        <div style="font-size:.85rem;color:#854F0B;font-weight:500">elapsed</div>
-        <div style="margin-left:auto;font-size:.85rem;font-weight:500;color:#533806">
-          <span id="break-remaining-label">${remainingMins > 0 ? remainingMins+' min remaining' : 'Break time used'}</span>
+// Build the banner — shown when on break OR when there are completed breaks
+let breakBanner = '';
+
+if (onBreak && activeBreak) {
+  const bs = activeBreak.start;
+
+  const startIso =
+    bs.ts ||
+    (bs.date && bs.time
+      ? bs.date + 'T' + bs.time + ':00'
+      : null);
+
+  const startTimeLabel = bs.time || '';
+
+  breakBanner = `
+    <div
+      id="break-timer-banner"
+      class="break-card fade-in-up"
+      data-start="${startIso || ''}"
+      data-total="${remainingMins}"
+    >
+      <div class="break-title">
+        ☕ On Break${startTimeLabel ? ' · started ' + startTimeLabel : ''}
+      </div>
+
+      <div style="display:flex;align-items:flex-end;justify-content:space-between;gap:12px;margin-bottom:8px">
+        <div>
+          <div
+            id="break-elapsed"
+            class="break-main"
+            style="margin-bottom:2px"
+          >
+            00:00
+          </div>
+
+          <div class="break-sub">
+            elapsed
+          </div>
+        </div>
+
+        <div
+          id="break-remaining-label"
+          class="badge badge-amber"
+        >
+          ${
+            remainingMins > 0
+              ? remainingMins + ' min remaining'
+              : 'Break time used'
+          }
         </div>
       </div>
-      ${breakHistory ? `<div style="font-size:.75rem;color:#854F0B;margin-bottom:4px">Previous: ${breakHistory}</div>` : ''}
-      <div style="font-size:.75rem;color:#98988f">Clock back in at the Dukasa Time Clock when ready.</div>
-    </div>`;
-  } else if (!onBreak && breakSessions.length > 0 && todayShift) {
+
+      ${
+        breakHistory
+          ? `
+          <div class="break-sub" style="margin-bottom:6px">
+            Previous: ${breakHistory}
+          </div>
+        `
+          : ''
+      }
+
+      <div class="small-muted">
+        Clock back in at the Dukasa Time Clock when ready.
+      </div>
+    </div>
+  `;
+
+} else if (!onBreak && breakSessions.length > 0 && todayShift) {
+
+  breakBanner = `
+    <div class="break-card fade-in-up">
+
+      <div class="break-title">
+        Break
+      </div>
+
+      <div class="break-main">
+        ${remainingMins} min remaining
+      </div>
+
+      <div class="break-sub">
+        Used ${usedBreakMins} of ${breakInfo.total} min
+      </div>
+
+      ${
+        breakHistory
+          ? `
+          <div class="break-sub" style="margin-top:8px">
+            ${breakHistory}
+          </div>
+        `
+          : ''
+      }
+
+    </div>
+  `;
+}
     // Not on break, but has taken breaks — show summary + remaining
     breakBanner = `
     <div style="background:var(--s2);border-radius:var(--r);padding:12px 14px;margin-bottom:12px;border:1px solid var(--border)">

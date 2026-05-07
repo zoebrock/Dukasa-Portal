@@ -693,16 +693,6 @@ if (onBreak && activeBreak) {
     </div>
   `;
 }
-    // Not on break, but has taken breaks — show summary + remaining
-    breakBanner = `
-    <div style="background:var(--s2);border-radius:var(--r);padding:12px 14px;margin-bottom:12px;border:1px solid var(--border)">
-      <div style="font-size:.75rem;font-weight:600;color:var(--t2);margin-bottom:4px">Break</div>
-      <div style="font-size:.85rem;color:var(--text)">Used ${usedBreakMins} of ${breakInfo.total} min
-        ${hasBreakLeft ? `<span style="color:#0F6E56;font-weight:600"> · ${remainingMins} min remaining</span>` : `<span style="color:#58584e"> · fully used</span>`}
-      </div>
-      ${breakHistory ? `<div style="font-size:.75rem;color:var(--t3);margin-top:3px">${breakHistory}</div>` : ''}
-    </div>`;
-  }
 
   // Show break info in Today's shift card — total break only, no paid/unpaid
   const breakLine = todayShift ? `${todayShift.breakMin||breakInfo.total} min break` : '';

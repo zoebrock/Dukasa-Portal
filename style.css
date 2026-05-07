@@ -181,6 +181,40 @@ a { color: inherit; text-decoration: none; }
 .card:active  { transform: scale(0.99); }
 .card-purple  { background: var(--purple-soft); border-color: rgba(83,74,183,0.2); }
 
+/* ── BREAK CARD ──────────────────────────────────────────── */
+.break-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  padding: 18px;
+  margin-top: 12px;
+  box-shadow: var(--shadow-sm);
+}
+
+.break-title {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--purple);
+  margin-bottom: 10px;
+}
+
+.break-main {
+  font-family: 'DM Serif Display', Georgia, serif;
+  font-size: 1.8rem;
+  line-height: 1;
+  letter-spacing: -0.03em;
+  color: var(--text);
+  margin-bottom: 8px;
+}
+
+.break-sub {
+  font-size: 0.9rem;
+  color: var(--text-2);
+  line-height: 1.5;
+}
+
 /* ── INFO GRID ───────────────────────────────────────────── */
 .info-grid { display: flex; flex-direction: column; gap: 10px; }
 .list-card {

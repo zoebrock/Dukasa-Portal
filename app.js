@@ -1285,7 +1285,24 @@ window.submitLeave = async function() {
   try {
     await saveList('leaveRequests',reqs);
     // Fire email notification without awaiting — don't block UI
-    gasPost({action:'sendEmail',fn:'sendLeaveRequestNotification',payload:{empId:state.emp.id,type,from,to,notes,reason:notes}})
+    gasPost({
+  action: 'sendEmail',
+  fn: 'sendLeaveRequestNotification',
+  payload: {
+    empId: state.emp.id,
+    empName: `${state.emp.first || ''} ${state.emp.last || ''}`.trim(),
+    empFirst: state.emp.first || '',
+    empLast: state.emp.last || '',
+    empEmail: state.emp.email || '',
+    empRole: state.emp.role || '',
+    type,
+    from,
+    to,
+    notes,
+    reason: notes,
+    source: 'Staff Portal'
+  }
+})
       .catch(err=>console.warn('Leave email failed (non-critical):',err));
     if(qs('#lv-form')) qs('#lv-form').innerHTML='';
     renderLeave();
@@ -1488,10 +1505,24 @@ window.submitOT = async function() {
 
     if (error) throw error;
 
-    gasPost({
-      action: 'sendEmail',
-      fn: 'sendOTRequestNotification',
-      payload: { empId: state.emp.id, date, start, end, reason }
+gasPost({
+  action: 'sendEmail',
+  fn: 'sendOTRequestNotification',
+  payload: {
+    empId: state.emp.id,
+    empName: `${state.emp.first || ''} ${state.emp.last || ''}`.trim(),
+    empFirst: state.emp.first || '',
+    empLast: state.emp.last || '',
+    empEmail: state.emp.email || '',
+    empRole: state.emp.role || '',
+    date,
+    start,
+    end,
+    reason,
+    requestedBy: 'staff',
+    source: 'Staff Portal'
+  }
+})
     }).catch(err => console.warn('OT email failed:', err));
 
     const fresh = await getAllData();

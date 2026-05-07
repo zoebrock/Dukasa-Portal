@@ -845,6 +845,8 @@ if (onBreak && activeBreak) {
       }).join(''):'<div class="helper-note">No upcoming shifts scheduled.</div>'}
     </div>`;
 
+}
+
 window.openAnnPopup = function(annId) {
   const allAnns = getList('announcements');
   const a = allAnns.find(x => x.id === annId);

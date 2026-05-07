@@ -854,7 +854,6 @@ if (onBreak && activeBreak) {
         </div>`;
       }).join(''):'<div class="helper-note">No upcoming shifts scheduled.</div>'}
     </div>`;
-}
 
 window.openAnnPopup = function(annId) {
   const allAnns = getList('announcements');

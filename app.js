@@ -22,13 +22,14 @@ const state = {
   weekOffset: 0,
 };
 async function getAllData() {
-  const [staff, shifts, clockEvents, leaveRequests, otRequests] = await Promise.all([
-    supabase.from('staff').select('*'),
-    supabase.from('shifts').select('*'),
-    supabase.from('clock_events').select('*'),
-    supabase.from('leave_requests').select('*'),
-    supabase.from('ot_requests').select('*')
-  ]);
+const [staff, shifts, clockEvents, leaveRequests, otRequests, sickDays] = await Promise.all([
+  supabase.from('staff').select('*'),
+  supabase.from('shifts').select('*'),
+  supabase.from('clock_events').select('*'),
+  supabase.from('leave_requests').select('*'),
+  supabase.from('ot_requests').select('*'),
+  supabase.from('sick_days').select('*')
+]);
 
   // Error handling
   if (staff.error) throw new Error(staff.error.message);
@@ -36,6 +37,7 @@ async function getAllData() {
   if (clockEvents.error) throw new Error(clockEvents.error.message);
   if (leaveRequests.error) throw new Error(leaveRequests.error.message);
   if (otRequests.error) throw new Error(otRequests.error.message);
+  if (sickDays.error) throw new Error(sickDays.error.message);
 
   // ── MAPPINGS ─────────────────────────────────────
 
@@ -66,6 +68,11 @@ async function getAllData() {
     availConfirmed: o.avail_confirmed
   }));
 
+  const mappedSickDays = (sickDays.data || []).map(s => ({
+  ...s,
+  empId: s.emp_id
+}));
+
   // ── RETURN STRUCTURE ─────────────────────────────
 
   return {
@@ -75,7 +82,8 @@ async function getAllData() {
       rx3_shifts: JSON.stringify(mappedShifts),
       rx3_clockEvents: JSON.stringify(mappedClockEvents),
       rx3_leaveRequests: JSON.stringify(mappedLeaveRequests),
-      rx3_otRequests: JSON.stringify(mappedOTRequests)
+      rx3_otRequests: JSON.stringify(mappedOTRequests),
+      rx3_sickDays: JSON.stringify(mappedSickDays)
     }
   };
 }

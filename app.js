@@ -1282,36 +1282,38 @@ window.submitLeave = async function() {
   if (btn) { btn.disabled=true; btn.textContent='Submitting...'; }
   const reqs=getList('leaveRequests');
   reqs.push({id:'lr'+Date.now(),empId:state.emp.id,type,from,to,notes,status:'pending',submitted:new Date().toISOString()});
-  try {
-    await saveList('leaveRequests',reqs);
-    // Fire email notification without awaiting — don't block UI
-    gasPost({
-  action: 'sendEmail',
-  fn: 'sendLeaveRequestNotification',
-  payload: {
-    empId: state.emp.id,
-    empName: `${state.emp.first || ''} ${state.emp.last || ''}`.trim(),
-    empFirst: state.emp.first || '',
-    empLast: state.emp.last || '',
-    empEmail: state.emp.email || '',
-    empRole: state.emp.role || '',
-    type,
-    from,
-    to,
-    notes,
-    reason: notes,
-    source: 'Staff Portal'
-  }
-})
-      .catch(err=>console.warn('Leave email failed (non-critical):',err));
-    if(qs('#lv-form')) qs('#lv-form').innerHTML='';
-    renderLeave();
-    toast('Leave request submitted! Your manager has been notified. ✓','success',5000);
-  } catch(e){
-    if (btn) { btn.disabled=false; btn.textContent='Submit request'; }
-    toast('Could not submit — please try again.','error');
-  }
-};
+try {
+  await saveList('leaveRequests', reqs);
+
+  // Fire email notification without awaiting — don't block UI
+  gasPost({
+    action: 'sendEmail',
+    fn: 'sendLeaveRequestNotification',
+    payload: {
+      empId: state.emp.id,
+      empName: `${state.emp.first || ''} ${state.emp.last || ''}`.trim(),
+      empFirst: state.emp.first || '',
+      empLast: state.emp.last || '',
+      empEmail: state.emp.email || '',
+      empRole: state.emp.role || '',
+      type,
+      from,
+      to,
+      notes,
+      reason: notes,
+      source: 'Staff Portal'
+    }
+  })
+    .catch(err=>console.warn('Leave email failed (non-critical):',err));
+
+  if(qs('#lv-form')) qs('#lv-form').innerHTML='';
+  renderLeave();
+  toast('Leave request submitted! Your manager has been notified. ✓','success',5000);
+
+} catch(e){
+  if (btn) { btn.disabled=false; btn.textContent='Submit request'; }
+  toast('Could not submit — please try again.','error');
+}
 
 // ── MC UPLOAD ──────────────────────────────────────────────────
 let _mcS=null, _mcD=null, _mcF=null;
@@ -1519,11 +1521,11 @@ gasPost({
     start,
     end,
     reason,
-    requestedBy: 'staff',
-    source: 'Staff Portal'
-  }
-})
-    }).catch(err => console.warn('OT email failed:', err));
+      requestedBy: 'staff',
+      source: 'Staff Portal'
+    }
+  })
+    .catch(err => console.warn('OT email failed:', err));
 
     const fresh = await getAllData();
     state.allData = fresh.data || {};

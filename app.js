@@ -1389,7 +1389,7 @@ window.openMC = function(sickId,date) {
       <div id="mc-err" style="display:none;color:#A32D2D;font-size:.82rem;margin-bottom:10px">⚠ Please select a file first.</div>
       <div class="btn-row">
         <button class="btn btn-secondary" style="flex:1" onclick="qs('#mc-wrap').innerHTML=''">Cancel</button>
-        <button class="btn btn-primary" style="flex:1" onclick="submitMC()">Upload certificate</button>
+        <button id="mc-submit-btn" class="btn btn-primary" style="flex:1" onclick="window.submitMC()">Upload certificate</button>
       </div>
     </div>`;
 };
@@ -1421,22 +1421,90 @@ window.handleMC = function(e) {
 };
 
 window.submitMC = async function() {
-  const errEl=qs('#mc-err');
-  if(!_mcF){if(errEl)errEl.style.display='block';return;}
-  const mcId='mc'+Date.now(), {data,name,type}=_mcF;
-  const mcs=getList('medCerts');
-  mcs.push({id:mcId,empId:state.emp.id,date:_mcD,sickId:_mcS,fileName:name,fileType:type,uploadedAt:new Date().toISOString(),managerNotified:false});
-  await saveList('medCerts',mcs);
-  if(qs('#mc-wrap')) qs('#mc-wrap').innerHTML='';
-  _mcF=null; renderLeave();
-  toast(`Uploading certificate...`,'info',15000);
+  const errEl = qs('#mc-err');
+  const btn = qs('#mc-submit-btn');
+
+  if (!_mcF) {
+    if (errEl) errEl.style.display = 'block';
+    return;
+  }
+
+  const mcId = 'mc' + Date.now();
+  const { data, name, type } = _mcF;
+
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Uploading…';
+  }
+
+  toast('Uploading certificate...', 'info', 15000);
+
   try {
-    const r=await gasPost({action:'uploadMC',mcId,fileName:name,fileType:type,data});
-    if(r?.result?.ok){
-      toast('Certificate uploaded! ✓','success');
-      await gasPost({action:'sendEmail',fn:'sendMCUploadNotification',payload:{empId:state.emp.id,date:_mcD,fileName:name}});
-    } else { toast('Upload error — try a JPG photo.','error'); }
-  } catch(e){ toast('Upload failed — please try again.','error'); }
+    const r = await gasPost({
+      action: 'uploadMC',
+      mcId,
+      empId: state.emp.id,
+      empName: `${state.emp.first || ''} ${state.emp.last || ''}`.trim(),
+      date: _mcD,
+      sickId: _mcS,
+      fileName: name,
+      fileType: type,
+      data
+    });
+
+    const ok = r?.ok || r?.result?.ok;
+
+    if (!ok) {
+      throw new Error(r?.error || r?.result?.error || 'Upload failed');
+    }
+
+    const mcs = getList('medCerts');
+
+    mcs.push({
+      id: mcId,
+      empId: state.emp.id,
+      date: _mcD,
+      sickId: _mcS,
+      fileName: name,
+      fileType: type,
+      uploadedAt: new Date().toISOString(),
+      managerNotified: true
+    });
+
+    await saveList('medCerts', mcs);
+
+    await gasPost({
+      action: 'sendEmail',
+      fn: 'sendMCUploadNotification',
+      payload: {
+        empId: state.emp.id,
+        empName: `${state.emp.first || ''} ${state.emp.last || ''}`.trim(),
+        date: _mcD,
+        fileName: name
+      }
+    }).catch(err => console.warn('MC email failed:', err));
+
+    if (qs('#mc-wrap')) qs('#mc-wrap').innerHTML = '';
+
+    _mcF = null;
+
+    const fresh = await getAllData();
+    if (fresh.ok) state.allData = fresh.data || state.allData;
+
+    renderLeave();
+    renderHome();
+
+    toast('Certificate uploaded! ✓', 'success');
+
+  } catch (e) {
+    console.error('MC upload failed:', e);
+    toast('Upload failed: ' + e.message, 'error', 6000);
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = 'Upload certificate';
+    }
+  }
 };
 
 // ── OT ─────────────────────────────────────────────────────────

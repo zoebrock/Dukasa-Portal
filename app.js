@@ -116,7 +116,16 @@ function FDOW(iso) {
 }
 
 function parseTime(t) { if (!t) return 0; const [h,m] = t.split(':').map(Number); return h*60+m; }
-function shiftHrs(s)  { return Math.max(0,(parseTime(s.end)-parseTime(s.start)-(s.breakMin||0))/60); }
+function roundHalf(n) {
+  return Math.round(n * 2) / 2;
+}
+
+// Paid rostered hours = gross shift length minus unpaid 30 min only
+function shiftHrs(s) {
+  if (!s || !s.start || !s.end) return 0;
+  const grossMins = parseTime(s.end) - parseTime(s.start);
+  return roundHalf(Math.max(0, (grossMins - 30) / 60));
+}
 
 function weekStart(offset=0) {
   const d = new Date(); d.setHours(0,0,0,0);
@@ -711,9 +720,7 @@ if (onBreak && activeBreak) {
   } else if (todayLeave) {
     todayCard=`<div class="card card-compact" style="border-color:rgba(15,110,86,.2);background:rgba(15,110,86,.06)"><span style="font-weight:600;color:#0F6E56">🏖 On approved leave today</span></div>`;
   } else if (todayShift) {
-    const grossMins = parseTime(todayShift.end)-parseTime(todayShift.start);
-    const grossHrs  = grossMins/60;
-    const h = Math.max(0,(grossMins - (grossHrs>8?50:grossHrs>=8?40:30))/60);
+const h = shiftHrs(todayShift);
     todayCard=`<div class="card card-purple">
       <div style="font-size:.72rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#534AB7;margin-bottom:4px">Today's shift</div>
       <div style="font-family:'DM Serif Display',Georgia,serif;font-size:1.9rem;letter-spacing:-.03em;color:#181816">${esc(todayShift.start)} – ${esc(todayShift.end)}</div>
@@ -776,10 +783,7 @@ if (onBreak && activeBreak) {
     if(!col) return null;
     const isSick  = allSick.some(sk=>sk.empId===col.id);
     const onLeave = allLeaves.find(l=>l.empId===col.id);
-    const grossMins = parseTime(s.end) - parseTime(s.start);
-    const grossHrs  = grossMins / 60;
-    const totalBreak = grossHrs>8?50:grossHrs>=8?40:30;
-    const netHrs    = Math.max(0,(grossMins-totalBreak)/60);
+const netHrs = shiftHrs(s);
     return {col, s, isSick, onLeave, netHrs};
   }).filter(Boolean).sort((a,b)=>(a.col.first||"").localeCompare(b.col.first||""));
 
@@ -981,10 +985,8 @@ function renderRoster() {
         } else if (d.myLeave) {
           myStatus=d.myLeave.type.replace(' Leave',''); chipStyle='background:#FAEEDA;color:#633806;';
         } else if (d.myShift) {
-          const gH=(parseTime(d.myShift.end)-parseTime(d.myShift.start))/60;
-          const brk=gH>8?50:gH>=8?40:30;
-          myStatus=`${d.myShift.start}–${d.myShift.end}`;
-          myTime=Math.max(0,gH-brk/60).toFixed(1)+'h';
+myStatus=`${d.myShift.start}–${d.myShift.end}`;
+myTime=shiftHrs(d.myShift).toFixed(1)+'h';
           chipStyle='background:#EEEDFE;color:#534AB7;';
         }
 
@@ -1057,9 +1059,7 @@ window.openDayRoster = function(ds) {
     seen[s.empId] = true;
     const isSick  = allSick.some(sk=>sk.empId===s.empId);
     const onLeave = allLeaves.find(l=>l.empId===s.empId);
-    const gH      = (parseTime(s.end)-parseTime(s.start))/60;
-    const brk     = gH>8?50:gH>=8?40:30;
-    const netH    = Math.max(0,gH-brk/60).toFixed(1);
+const netH = shiftHrs(s).toFixed(1);
     const ini     = ((col.first||'')[0]||'')+((col.last||'')[0]||'');
     rows.push({col, s, isSick, onLeave, netH, ini, type:'shift'});
   });

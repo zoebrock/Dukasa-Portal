@@ -588,6 +588,14 @@ function renderHome() {
   const shifts   = getList('shifts').filter(s=>s.empId===emp.id&&s.published);
   const sick     = getList('sickDays').filter(s=>s.empId===emp.id);
   const leaves   = getList('leaveRequests').filter(l=>l.empId===emp.id);
+  const medCerts = getList('medCerts').filter(m=>m.empId===emp.id);
+
+const outstandingMC = sick.find(s =>
+  !medCerts.some(mc =>
+    mc.sickId === s.id ||
+    (mc.empId === emp.id && mc.date === s.date)
+  )
+);
   const td       = today();
   const ws       = weekStart(0);
 
@@ -855,9 +863,18 @@ const netHrs = shiftHrs(s);
         <div class="hero-time-small">local time</div>
       </div>
     </div>
-    ${todayCard}
-    ${breakBanner}
-    ${annSection}
+${todayCard}
+${outstandingMC ? `
+  <div class="card card-alert" style="margin:14px 0;padding:18px;border:1px solid rgba(163,45,45,.25);background:#FCEBEB;border-radius:18px">
+    <div style="font-weight:700;color:#A32D2D;margin-bottom:6px">Medical certificate required</div>
+    <div style="font-size:14px;color:#585854;margin-bottom:12px">
+      You were marked as sick on ${esc(FDS(outstandingMC.date))}. Please upload your medical certificate when available.
+    </div>
+    <button class="btn btn-primary" onclick="nav('leave')">Upload medical certificate</button>
+  </div>
+` : ''}
+${breakBanner}
+${annSection}
     ${teamSection}
     <div class="section-label">This week at a glance</div>
     <div class="week-strip">

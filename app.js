@@ -543,13 +543,21 @@ function buildApp() {
   startTicker();
 }
 
-window.nav = function(name) {
+function nav(name) {
   state.currentView = name;
   qsa('.view').forEach(v=>v.classList.toggle('active', v.id==='view-'+name));
   qsa('.tab').forEach(t=>t.classList.toggle('active', t.dataset.view===name));
   anim(qs('#view-'+name));
   window.scrollTo({top:0,behavior:'smooth'});
   syncTopbar();
+}
+
+window.nav = nav;
+
+function syncTopbar() {
+  const tb=qs('.topbar'); if(!tb) return;
+  const s=window.scrollY>8;
+  tb.style.boxShadow = s ? '0 4px 20px rgba(0,0,0,.08)' : 'none';
 }
 
 function syncTopbar() {
@@ -870,7 +878,7 @@ ${outstandingMC ? `
     <div style="font-size:14px;color:#585854;margin-bottom:12px">
       You were marked as sick on ${esc(FDS(outstandingMC.date))}. Please upload your medical certificate when available.
     </div>
-    <button class="btn btn-primary" onclick="nav('leave')">Upload medical certificate</button>
+    <button class="btn btn-primary" onclick="window.nav('leave')">Upload medical certificate</button>
   </div>
 ` : ''}
 ${breakBanner}

@@ -1883,13 +1883,16 @@ async function startSync() {
         if (f) state.emp = f;
 
         // Only re-render the current view, not the whole app
-        if (state.currentView === 'home') renderHome();
-        if (state.currentView === 'roster') renderRoster();
-        if (state.currentView === 'leave') renderLeave();
-        if (state.currentView === 'ot') renderOT();
-        if (state.currentView === 'hours') renderHours();
-        if (state.currentView === 'profile') renderProfile();
-      }
+const viewEl = qs('#view-' + state.currentView);
+
+if (viewEl) {
+  if (state.currentView === 'home') renderHome();
+  if (state.currentView === 'roster') renderRoster();
+  if (state.currentView === 'leave') renderLeave();
+  if (state.currentView === 'ot') renderOT();
+  if (state.currentView === 'hours') renderHours();
+  if (state.currentView === 'profile') renderProfile();
+}
     } catch (e) {
       console.warn('Background sync failed:', e.message);
     }

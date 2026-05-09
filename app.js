@@ -106,6 +106,10 @@ const qs  = (s, r = document) => r.querySelector(s);
 const qsa = (s, r = document) => [...r.querySelectorAll(s)];
 const esc = v => String(v ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 
+// Make helpers available to inline onclick handlers
+window.qs = qs;
+window.qsa = qsa;
+
 // IMPORTANT: never use toISOString() for local dates — it returns UTC
 // which is yesterday in AU timezones before ~10-11am
 function localISO(d) {

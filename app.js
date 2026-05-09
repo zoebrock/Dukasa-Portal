@@ -22,13 +22,14 @@ const state = {
   weekOffset: 0,
 };
 async function getAllData() {
-const [staff, shifts, clockEvents, leaveRequests, otRequests, sickDays] = await Promise.all([
+const [staff, shifts, clockEvents, leaveRequests, otRequests, sickDays, medCerts] = await Promise.all([
   supabase.from('staff').select('*'),
   supabase.from('shifts').select('*'),
   supabase.from('clock_events').select('*'),
   supabase.from('leave_requests').select('*'),
   supabase.from('ot_requests').select('*'),
-  supabase.from('sick_days').select('*')
+  supabase.from('sick_days').select('*'),
+  supabase.from('med_certs').select('*')
 ]);
 
   // Error handling
@@ -38,6 +39,7 @@ const [staff, shifts, clockEvents, leaveRequests, otRequests, sickDays] = await 
   if (leaveRequests.error) throw new Error(leaveRequests.error.message);
   if (otRequests.error) throw new Error(otRequests.error.message);
   if (sickDays.error) throw new Error(sickDays.error.message);
+  if (medCerts.error) throw new Error(medCerts.error.message);
 
   // ── MAPPINGS ─────────────────────────────────────
 
@@ -73,6 +75,16 @@ const [staff, shifts, clockEvents, leaveRequests, otRequests, sickDays] = await 
   empId: s.emp_id
 }));
 
+  const mappedMedCerts = (medCerts.data || []).map(m => ({
+  ...m,
+  empId: m.emp_id,
+  sickId: m.sick_id,
+  fileName: m.file_name,
+  fileType: m.file_type,
+  uploadedAt: m.uploaded_at,
+  managerNotified: m.manager_notified
+}));
+
   // ── RETURN STRUCTURE ─────────────────────────────
 
   return {
@@ -83,7 +95,8 @@ const [staff, shifts, clockEvents, leaveRequests, otRequests, sickDays] = await 
       rx3_clockEvents: JSON.stringify(mappedClockEvents),
       rx3_leaveRequests: JSON.stringify(mappedLeaveRequests),
       rx3_otRequests: JSON.stringify(mappedOTRequests),
-      rx3_sickDays: JSON.stringify(mappedSickDays)
+      rx3_sickDays: JSON.stringify(mappedSickDays),
+      rx3_medCerts: JSON.stringify(mappedMedCerts)
     }
   };
 }
@@ -270,7 +283,8 @@ async function saveList(key, arr) {
     shifts: 'shifts',
     clockEvents: 'clock_events',
     leaveRequests: 'leave_requests',
-    otRequests: 'ot_requests'
+    otRequests: 'ot_requests',
+    medCerts: 'med_certs'
   };
 
   const table = tableMap[key];
@@ -315,6 +329,22 @@ async function saveList(key, arr) {
       delete copy.staffRead;
       delete copy.availConfirmed;
     }
+    
+    if (key === 'medCerts') {
+  copy.emp_id = copy.empId;
+  copy.sick_id = copy.sickId;
+  copy.file_name = copy.fileName;
+  copy.file_type = copy.fileType;
+  copy.uploaded_at = copy.uploadedAt;
+  copy.manager_notified = copy.managerNotified;
+
+  delete copy.empId;
+  delete copy.sickId;
+  delete copy.fileName;
+  delete copy.fileType;
+  delete copy.uploadedAt;
+  delete copy.managerNotified;
+}
 
     return copy;
   });

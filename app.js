@@ -543,7 +543,7 @@ function buildApp() {
   startTicker();
 }
 
-function nav(name) {
+window.nav = function(name) {
   state.currentView = name;
   qsa('.view').forEach(v=>v.classList.toggle('active', v.id==='view-'+name));
   qsa('.tab').forEach(t=>t.classList.toggle('active', t.dataset.view===name));

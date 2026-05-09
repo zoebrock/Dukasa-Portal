@@ -560,12 +560,6 @@ function syncTopbar() {
   tb.style.boxShadow = s ? '0 4px 20px rgba(0,0,0,.08)' : 'none';
 }
 
-function syncTopbar() {
-  const tb=qs('.topbar'); if(!tb) return;
-  const s=window.scrollY>8;
-  tb.style.boxShadow = s ? '0 4px 20px rgba(0,0,0,.08)' : 'none';
-}
-
 function anim(root=document) {
   if (!root) return;
   qsa('.page-header,.card,.kpi,.week-strip,.btn-row',root).forEach((el,i)=>{

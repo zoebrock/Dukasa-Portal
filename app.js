@@ -1314,6 +1314,7 @@ try {
   if (btn) { btn.disabled=false; btn.textContent='Submit request'; }
   toast('Could not submit — please try again.','error');
 }
+};
 
 // ── MC UPLOAD ──────────────────────────────────────────────────
 let _mcS=null, _mcD=null, _mcF=null;

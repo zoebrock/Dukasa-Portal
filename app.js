@@ -21,18 +21,27 @@ const state = {
   allData: {},
   weekOffset: 0,
 };
-const [staff, shifts, clockEvents, leaveRequests, otRequests, sickDays, medCerts, announcements] = await Promise.all([
-  supabase.from('staff').select('*'),
-  supabase.from('shifts').select('*'),
-  supabase.from('clock_events').select('*'),
-  supabase.from('leave_requests').select('*'),
-  supabase.from('ot_requests').select('*'),
-  supabase.from('sick_days').select('*'),
-  supabase.from('med_certs').select('*'),
-  supabase.from('announcements').select('*')
-]);
+async function getAllData() {
+  const [
+    staff,
+    shifts,
+    clockEvents,
+    leaveRequests,
+    otRequests,
+    sickDays,
+    medCerts,
+    announcements
+  ] = await Promise.all([
+    supabase.from('staff').select('*'),
+    supabase.from('shifts').select('*'),
+    supabase.from('clock_events').select('*'),
+    supabase.from('leave_requests').select('*'),
+    supabase.from('ot_requests').select('*'),
+    supabase.from('sick_days').select('*'),
+    supabase.from('med_certs').select('*'),
+    supabase.from('announcements').select('*')
+  ]);
 
-  // Error handling
   if (staff.error) throw new Error(staff.error.message);
   if (shifts.error) throw new Error(shifts.error.message);
   if (clockEvents.error) throw new Error(clockEvents.error.message);
@@ -41,8 +50,6 @@ const [staff, shifts, clockEvents, leaveRequests, otRequests, sickDays, medCerts
   if (sickDays.error) throw new Error(sickDays.error.message);
   if (medCerts.error) throw new Error(medCerts.error.message);
   if (announcements.error) throw new Error(announcements.error.message);
-
-  // ── MAPPINGS ─────────────────────────────────────
 
   const mappedShifts = (shifts.data || []).map(s => ({
     ...s,
@@ -72,27 +79,25 @@ const [staff, shifts, clockEvents, leaveRequests, otRequests, sickDays, medCerts
   }));
 
   const mappedSickDays = (sickDays.data || []).map(s => ({
-  ...s,
-  empId: s.emp_id
-}));
+    ...s,
+    empId: s.emp_id
+  }));
 
   const mappedMedCerts = (medCerts.data || []).map(m => ({
-  ...m,
-  empId: m.emp_id,
-  sickId: m.sick_id,
-  fileName: m.file_name,
-  fileType: m.file_type,
-  uploadedAt: m.uploaded_at,
-  managerNotified: m.manager_notified
-}));
+    ...m,
+    empId: m.emp_id,
+    sickId: m.sick_id,
+    fileName: m.file_name,
+    fileType: m.file_type,
+    uploadedAt: m.uploaded_at,
+    managerNotified: m.manager_notified
+  }));
 
-const mappedAnnouncements = (announcements.data || []).map(a => ({
-  ...a,
-  staffIds: a.staffIds || a.staff_ids || a.staffids || [],
-  notifyStaff: a.notifyStaff || a.notify_staff || false
-}));
-
-  // ── RETURN STRUCTURE ─────────────────────────────
+  const mappedAnnouncements = (announcements.data || []).map(a => ({
+    ...a,
+    staffIds: a.staffIds || a.staff_ids || a.staffids || [],
+    notifyStaff: a.notifyStaff || a.notify_staff || false
+  }));
 
   return {
     ok: true,

@@ -21,15 +21,15 @@ const state = {
   allData: {},
   weekOffset: 0,
 };
-async function getAllData() {
-const [staff, shifts, clockEvents, leaveRequests, otRequests, sickDays, medCerts] = await Promise.all([
+const [staff, shifts, clockEvents, leaveRequests, otRequests, sickDays, medCerts, announcements] = await Promise.all([
   supabase.from('staff').select('*'),
   supabase.from('shifts').select('*'),
   supabase.from('clock_events').select('*'),
   supabase.from('leave_requests').select('*'),
   supabase.from('ot_requests').select('*'),
   supabase.from('sick_days').select('*'),
-  supabase.from('med_certs').select('*')
+  supabase.from('med_certs').select('*'),
+  supabase.from('announcements').select('*')
 ]);
 
   // Error handling
@@ -40,6 +40,7 @@ const [staff, shifts, clockEvents, leaveRequests, otRequests, sickDays, medCerts
   if (otRequests.error) throw new Error(otRequests.error.message);
   if (sickDays.error) throw new Error(sickDays.error.message);
   if (medCerts.error) throw new Error(medCerts.error.message);
+  if (announcements.error) throw new Error(announcements.error.message);
 
   // ── MAPPINGS ─────────────────────────────────────
 
@@ -85,6 +86,12 @@ const [staff, shifts, clockEvents, leaveRequests, otRequests, sickDays, medCerts
   managerNotified: m.manager_notified
 }));
 
+const mappedAnnouncements = (announcements.data || []).map(a => ({
+  ...a,
+  staffIds: a.staffIds || a.staff_ids || a.staffids || [],
+  notifyStaff: a.notifyStaff || a.notify_staff || false
+}));
+
   // ── RETURN STRUCTURE ─────────────────────────────
 
   return {
@@ -96,7 +103,8 @@ const [staff, shifts, clockEvents, leaveRequests, otRequests, sickDays, medCerts
       rx3_leaveRequests: JSON.stringify(mappedLeaveRequests),
       rx3_otRequests: JSON.stringify(mappedOTRequests),
       rx3_sickDays: JSON.stringify(mappedSickDays),
-      rx3_medCerts: JSON.stringify(mappedMedCerts)
+      rx3_medCerts: JSON.stringify(mappedMedCerts),
+      rx3_announcements: JSON.stringify(mappedAnnouncements)
     }
   };
 }
@@ -780,7 +788,11 @@ const h = shiftHrs(todayShift);
     const annDate = a.date && String(a.date).match(/^\d{4}-\d{2}-\d{2}$/) ? a.date : null;
     if(!annDate) return false; // skip announcements with invalid dates
     if(annDate < td) return false;
-    if(a.staffIds && a.staffIds.length > 0) return a.staffIds.includes(emp.id);
+    const staffIds = a.staffIds || a.staff_ids || a.staffids || [];
+
+if (staffIds.length > 0) {
+  return staffIds.map(String).includes(String(emp.id));
+}
     if(!a.roles||!a.roles.length) return true;
     if(a.roles.includes('All Staff')) return true;
     return a.roles.includes(emp.role);

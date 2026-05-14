@@ -1300,11 +1300,27 @@ function renderLeave() {
     </div>
     <div id="lv-form"></div>
     <div class="section-label">Pending requests</div>
-    ${pending.length?pending.map(l=>`
-      <div class="card list-card" style="margin-bottom:0">
-        <div><div class="list-title">${esc(l.type)}</div><div class="list-copy">${esc(FDS(l.from))} – ${esc(FDS(l.to))}</div></div>
-        ${badge(l.status)}
-      </div>`).join(''):'<div class="helper-note">No pending requests.</div>'}
+${pending.length?pending.map(l=>`
+  <div class="card list-card" style="margin-bottom:0">
+    <div>
+      <div class="list-title">${esc(l.type)}</div>
+
+      <div class="list-copy">
+        ${esc(FDS(l.from))} – ${esc(FDS(l.to))}
+      </div>
+
+      ${l.status === 'pending' ? `
+        <div class="btn-row" style="margin-top:10px">
+          <button class="btn btn-secondary btn-sm" onclick="openEditLeaveRequest('${l.id}')">Edit</button>
+          <button class="btn btn-danger btn-sm" onclick="cancelLeaveRequest('${l.id}')">Cancel request</button>
+        </div>
+      ` : ''}
+
+    </div>
+
+    ${badge(l.status)}
+  </div>
+`).join(''):'<div class="helper-note">No pending requests.</div>'}
     <div class="section-label">History</div>
     <div class="info-grid">
       ${hist.length?hist.map(l=>`
@@ -1396,6 +1412,198 @@ try {
   if (btn) { btn.disabled=false; btn.textContent='Submit request'; }
   toast('Could not submit — please try again.','error');
 }
+};
+
+window.openEditLeaveRequest = function(id) {
+  const reqs = getList('leaveRequests');
+  const lr = reqs.find(l => l.id === id && l.empId === state.emp.id);
+
+  if (!lr) {
+    toast('Could not find that leave request.', 'error');
+    return;
+  }
+
+  if (lr.status !== 'pending') {
+    toast('Only pending leave requests can be edited.', 'warning');
+    return;
+  }
+
+  const c = qs('#lv-form');
+  if (!c) return;
+
+  c.innerHTML = `
+    <div class="card" style="margin-bottom:14px">
+      <div style="font-family:'DM Serif Display',Georgia,serif;font-size:1.3rem;margin-bottom:16px">Edit leave request</div>
+
+      <div class="form-grid">
+        <div class="input-wrap"><label>Leave type</label>
+          <select class="select" id="lv-edit-t">
+            ${['Annual Leave','Sick Leave','Personal Leave','Carers Leave','Unpaid Leave'].map(t =>
+              `<option ${t === lr.type ? 'selected' : ''}>${t}</option>`
+            ).join('')}
+          </select>
+        </div>
+
+        <div class="input-wrap"><label>From</label><input class="input" id="lv-edit-f" type="date" value="${esc(lr.from || '')}"></div>
+        <div class="input-wrap"><label>To</label><input class="input" id="lv-edit-to" type="date" value="${esc(lr.to || '')}"></div>
+
+        <div class="input-wrap full-span">
+          <label>Notes (optional)</label>
+          <textarea class="textarea" id="lv-edit-n" placeholder="Any additional context.">${esc(lr.notes || '')}</textarea>
+        </div>
+
+        <div id="lv-edit-err" style="display:none;color:#A32D2D;font-size:.82rem" class="full-span">
+          ⚠ Please enter valid from and to dates.
+        </div>
+
+        <div class="btn-row full-span">
+          <button class="btn btn-secondary" onclick="qs('#lv-form').innerHTML=''">Cancel</button>
+          <button class="btn btn-primary" id="lv-edit-submit" onclick="saveEditedLeaveRequest('${lr.id}')">Save changes</button>
+        </div>
+      </div>
+    </div>
+  `;
+
+  window.nav('leave');
+};
+
+window.saveEditedLeaveRequest = async function(id) {
+  const type = qs('#lv-edit-t')?.value;
+  const from = qs('#lv-edit-f')?.value;
+  const to = qs('#lv-edit-to')?.value;
+  const notes = (qs('#lv-edit-n')?.value || '').trim();
+  const errEl = qs('#lv-edit-err');
+  const btn = qs('#lv-edit-submit');
+
+  if (!from || !to || from > to) {
+    if (errEl) errEl.style.display = 'block';
+    return;
+  }
+
+  if (errEl) errEl.style.display = 'none';
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Saving...';
+  }
+
+  try {
+    const reqs = getList('leaveRequests');
+    const idx = reqs.findIndex(l => l.id === id && l.empId === state.emp.id);
+
+    if (idx < 0) throw new Error('Leave request not found.');
+    if (reqs[idx].status !== 'pending') throw new Error('Only pending leave requests can be edited.');
+
+    const old = { ...reqs[idx] };
+
+    reqs[idx] = {
+      ...reqs[idx],
+      type,
+      from,
+      to,
+      notes,
+      editedAt: new Date().toISOString(),
+      lastEditedBy: state.emp.id
+    };
+
+    await saveList('leaveRequests', reqs);
+
+    await gasPost({
+      action: 'sendEmail',
+      fn: 'sendLeaveRequestNotification',
+      payload: {
+        empId: state.emp.id,
+        empName: `${state.emp.first || ''} ${state.emp.last || ''}`.trim(),
+        empFirst: state.emp.first || '',
+        empLast: state.emp.last || '',
+        empEmail: state.emp.email || '',
+        empRole: state.emp.role || '',
+        type: `[UPDATED] ${type}`,
+        from,
+        to,
+        notes:
+          `UPDATED LEAVE REQUEST\n\n` +
+          `Previous request: ${old.type || ''}, ${old.from || ''} to ${old.to || ''}\n` +
+          `Previous notes: ${old.notes || 'None'}\n\n` +
+          `Updated notes: ${notes || 'None'}`,
+        reason: notes,
+        source: 'Staff Portal'
+      }
+    }).catch(err => console.warn('Leave edit email failed:', err));
+
+    if (qs('#lv-form')) qs('#lv-form').innerHTML = '';
+
+    const fresh = await getAllData();
+    if (fresh.ok) state.allData = fresh.data || state.allData;
+
+    renderLeave();
+    renderHome();
+
+    toast('Leave request updated. Your manager has been notified. ✓', 'success', 5000);
+
+  } catch (e) {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = 'Save changes';
+    }
+    toast('Could not update request: ' + e.message, 'error', 6000);
+  }
+};
+
+window.cancelLeaveRequest = async function(id) {
+  const reqs = getList('leaveRequests');
+  const lr = reqs.find(l => l.id === id && l.empId === state.emp.id);
+
+  if (!lr) {
+    toast('Could not find that leave request.', 'error');
+    return;
+  }
+
+  if (lr.status !== 'pending') {
+    toast('Only pending leave requests can be cancelled.', 'warning');
+    return;
+  }
+
+  if (!confirm('Cancel this leave request? Your manager will be notified.')) return;
+
+  try {
+    const updated = reqs.filter(l => !(l.id === id && l.empId === state.emp.id));
+
+    await saveList('leaveRequests', updated);
+
+    await gasPost({
+      action: 'sendEmail',
+      fn: 'sendLeaveRequestNotification',
+      payload: {
+        empId: state.emp.id,
+        empName: `${state.emp.first || ''} ${state.emp.last || ''}`.trim(),
+        empFirst: state.emp.first || '',
+        empLast: state.emp.last || '',
+        empEmail: state.emp.email || '',
+        empRole: state.emp.role || '',
+        type: `[CANCELLED] ${lr.type}`,
+        from: lr.from,
+        to: lr.to,
+        notes:
+          `CANCELLED LEAVE REQUEST\n\n` +
+          `Original request: ${lr.type || ''}, ${lr.from || ''} to ${lr.to || ''}\n` +
+          `Original notes: ${lr.notes || 'None'}\n\n` +
+          `This request has been cancelled by the staff member via the Staff Portal.`,
+        reason: lr.notes || '',
+        source: 'Staff Portal'
+      }
+    }).catch(err => console.warn('Leave cancellation email failed:', err));
+
+    const fresh = await getAllData();
+    if (fresh.ok) state.allData = fresh.data || state.allData;
+
+    renderLeave();
+    renderHome();
+
+    toast('Leave request cancelled. Your manager has been notified. ✓', 'success', 5000);
+
+  } catch (e) {
+    toast('Could not cancel request: ' + e.message, 'error', 6000);
+  }
 };
 
 // ── MC UPLOAD ──────────────────────────────────────────────────

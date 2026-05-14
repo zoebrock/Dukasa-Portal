@@ -34,7 +34,14 @@ async function getAllData() {
   ] = await Promise.all([
     supabase.from('staff').select('*'),
     supabase.from('shifts').select('*'),
-    supabase.from('clock_events').select('*'),
+    supabase
+  .from('clock_events')
+  .select('*')
+  .gte('date', addDays(today(), -14))
+  .lte('date', addDays(today(), 1))
+  .order('date', { ascending: false })
+  .order('time', { ascending: false })
+  .limit(2000),
     supabase.from('leave_requests').select('*'),
     supabase.from('ot_requests').select('*'),
     supabase.from('sick_days').select('*'),
@@ -59,11 +66,16 @@ async function getAllData() {
     otId: s.ot_id
   }));
 
-  const mappedClockEvents = (clockEvents.data || []).map(e => ({
-    ...e,
-    empId: e.emp_id,
-    ts: e.timestamp
-  }));
+const mappedClockEvents = (clockEvents.data || []).map(e => ({
+  ...e,
+  empId: e.emp_id || e.empId,
+  shiftId: e.shift_id || e.shiftId,
+  photoUrl: e.photo_url || e.photoUrl,
+  ts: e.ts || e.timestamp || e.created_at || null,
+  date: cleanDate_(e.date),
+  time: cleanTime_(e.time),
+  type: String(e.type || '').trim()
+}));
 
   const mappedLeaveRequests = (leaveRequests.data || []).map(l => ({
     ...l,

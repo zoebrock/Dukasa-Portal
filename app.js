@@ -319,6 +319,10 @@ async function saveList(key, arr) {
   const table = tableMap[key];
   if (!table) return;
 
+  if (key === 'clockEvents') {
+    throw new Error('Staff portal must not write clock events.');
+  }
+
   const mapped = arr.map(item => {
     const copy = { ...item };
 
@@ -327,19 +331,10 @@ async function saveList(key, arr) {
       copy.break_min = copy.breakMin;
       copy.is_ot = copy.isOT;
       copy.ot_id = copy.otId;
-
       delete copy.empId;
       delete copy.breakMin;
       delete copy.isOT;
       delete copy.otId;
-    }
-
-    if (key === 'clockEvents') {
-      copy.emp_id = copy.empId;
-      copy.timestamp = copy.ts;
-
-      delete copy.empId;
-      delete copy.ts;
     }
 
     if (key === 'leaveRequests') {
@@ -352,27 +347,37 @@ async function saveList(key, arr) {
       copy.requested_by = copy.requestedBy;
       copy.staff_read = copy.staffRead;
       copy.avail_confirmed = copy.availConfirmed;
-
       delete copy.empId;
       delete copy.requestedBy;
       delete copy.staffRead;
       delete copy.availConfirmed;
     }
-    
-    if (key === 'medCerts') {
-  copy.emp_id = copy.empId;
-  copy.sick_id = copy.sickId;
-  copy.file_name = copy.fileName;
-  copy.file_type = copy.fileType;
-  copy.uploaded_at = copy.uploadedAt;
-  copy.manager_notified = copy.managerNotified;
 
-  delete copy.empId;
-  delete copy.sickId;
-  delete copy.fileName;
-  delete copy.fileType;
-  delete copy.uploadedAt;
-  delete copy.managerNotified;
+    if (key === 'medCerts') {
+      copy.emp_id = copy.empId;
+      copy.sick_id = copy.sickId;
+      copy.file_name = copy.fileName;
+      copy.file_type = copy.fileType;
+      copy.uploaded_at = copy.uploadedAt;
+      copy.manager_notified = copy.managerNotified;
+      delete copy.empId;
+      delete copy.sickId;
+      delete copy.fileName;
+      delete copy.fileType;
+      delete copy.uploadedAt;
+      delete copy.managerNotified;
+    }
+
+    return copy;
+  });
+
+  if (!mapped.length) return;
+
+  const { error } = await supabase
+    .from(table)
+    .upsert(mapped, { onConflict: 'id' });
+
+  if (error) throw new Error(error.message);
 }
 
     return copy;
@@ -1566,9 +1571,16 @@ window.cancelLeaveRequest = async function(id) {
   if (!confirm('Cancel this leave request? Your manager will be notified.')) return;
 
   try {
-    const updated = reqs.filter(l => !(l.id === id && l.empId === state.emp.id));
+const updated = reqs.filter(l => !(l.id === id && l.empId === state.emp.id));
+state.allData.rx3_leaveRequests = JSON.stringify(updated);
 
-    await saveList('leaveRequests', updated);
+const { error } = await supabase
+  .from('leave_requests')
+  .delete()
+  .eq('id', id)
+  .eq('emp_id', state.emp.id);
+
+if (error) throw new Error(error.message);
 
     await gasPost({
       action: 'sendEmail',

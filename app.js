@@ -380,9 +380,6 @@ async function saveList(key, arr) {
   if (error) throw new Error(error.message);
 }
 
-    return copy;
-  });
-
 // ── AUTH ───────────────────────────────────────────────────────
 function showLogin(err='') {
   document.body.innerHTML = `

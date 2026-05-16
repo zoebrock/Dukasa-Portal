@@ -383,23 +383,6 @@ async function saveList(key, arr) {
     return copy;
   });
 
-  // Replace table contents safely
-  const { error: deleteError } = await supabase
-    .from(table)
-    .delete()
-    .neq('id', '');
-
-  if (deleteError) throw new Error(deleteError.message);
-
-  if (mapped.length) {
-    const { error: insertError } = await supabase
-      .from(table)
-      .insert(mapped);
-
-    if (insertError) throw new Error(insertError.message);
-  }
-}
-
 // ── AUTH ───────────────────────────────────────────────────────
 function showLogin(err='') {
   document.body.innerHTML = `

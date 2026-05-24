@@ -1688,20 +1688,47 @@ window.submitMC = async function() {
       throw new Error(r?.error || r?.result?.error || 'Upload failed');
     }
 
-    const mcs = getList('medCerts');
+const result = r?.result || r;
 
-    mcs.push({
-      id: mcId,
-      empId: state.emp.id,
-      date: _mcD,
-      sickId: _mcS,
-      fileName: name,
-      fileType: type,
-      uploadedAt: new Date().toISOString(),
-      managerNotified: true
-    });
+const fileId =
+  result.fileId ||
+  result.file_id ||
+  result.id ||
+  '';
 
-    await saveList('medCerts', mcs);
+const fileUrl =
+  result.fileUrl ||
+  result.file_url ||
+  result.url ||
+  result.webViewLink ||
+  '';
+
+if (!fileId && !fileUrl) {
+  throw new Error('Upload completed, but no Google Drive file ID or URL was returned.');
+}
+
+const mcs = getList('medCerts');
+
+mcs.push({
+  id: mcId,
+  empId: state.emp.id,
+  date: _mcD,
+  sickId: _mcS,
+  fileName: name,
+  fileType: type,
+
+  fileId,
+  file_id: fileId,
+  fileUrl,
+  file_url: fileUrl,
+  driveFolderId: '1HDf6Wk7UIHl4hvaTByrUINZOqckCS_1q',
+  drive_folder_id: '1HDf6Wk7UIHl4hvaTByrUINZOqckCS_1q',
+
+  uploadedAt: new Date().toISOString(),
+  managerNotified: true
+});
+
+await saveList('medCerts', mcs);
 
     await gasPost({
       action: 'sendEmail',

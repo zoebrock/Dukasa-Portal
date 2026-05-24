@@ -554,6 +554,7 @@ function buildApp() {
   initPullToRefresh();
   renderAll();
   startSync();
+  startClockEventsRealtime();
   startTicker();
 }
 
@@ -2201,6 +2202,39 @@ async function startSync() {
       console.warn('Background sync failed:', e.message);
     }
   }, 30000);
+}
+function startClockEventsRealtime() {
+  supabase
+    .channel('staff-clock-events-live')
+    .on(
+      'postgres_changes',
+      { event: '*', schema: 'public', table: 'clock_events' },
+      async () => {
+        try {
+          const r = await getAllData();
+
+          if (r.ok) {
+            state.allData = r.data || {};
+
+            const email = (state.emp?.email || '').toLowerCase();
+            const freshEmp = email
+              ? getList('staff').find(s => (s.email || '').toLowerCase() === email)
+              : null;
+
+            if (freshEmp) state.emp = freshEmp;
+
+            if (state.currentView === 'home') renderHome();
+            if (state.currentView === 'roster') renderRoster();
+            if (state.currentView === 'hours') renderHours();
+          }
+        } catch (e) {
+          console.warn('Realtime clock event refresh failed:', e.message);
+        }
+      }
+    )
+    .subscribe(status => {
+      console.log('Staff realtime clock_events:', status);
+    });
 }
 // ── LOADING ────────────────────────────────────────────────────
 function showLoading() {

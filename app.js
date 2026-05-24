@@ -1409,11 +1409,6 @@ window.openEditLeaveRequest = function(id) {
     return;
   }
 
-  if (lr.status !== 'pending') {
-    toast('Only pending leave requests can be edited.', 'warning');
-    return;
-  }
-
   const c = qs('#lv-form');
   if (!c) return;
 
@@ -1477,19 +1472,27 @@ window.saveEditedLeaveRequest = async function(id) {
     const idx = reqs.findIndex(l => l.id === id && l.empId === state.emp.id);
 
     if (idx < 0) throw new Error('Leave request not found.');
-    if (reqs[idx].status !== 'pending') throw new Error('Only pending leave requests can be edited.');
+    const wasApproved = reqs[idx].status === 'approved';
 
     const old = { ...reqs[idx] };
 
-    reqs[idx] = {
-      ...reqs[idx],
-      type,
-      from,
-      to,
-      notes,
-      editedAt: new Date().toISOString(),
-      lastEditedBy: state.emp.id
-    };
+reqs[idx] = {
+  ...reqs[idx],
+  type,
+  from,
+  to,
+  notes,
+  status: wasApproved ? 'pending' : reqs[idx].status,
+  changeRequested: wasApproved,
+  previousFrom: wasApproved ? old.from : reqs[idx].previousFrom,
+  previousTo: wasApproved ? old.to : reqs[idx].previousTo,
+  previousType: wasApproved ? old.type : reqs[idx].previousType,
+  previousStatus: wasApproved ? old.status : reqs[idx].previousStatus,
+  syncedToRoster: wasApproved ? false : reqs[idx].syncedToRoster,
+  syncedToLeaveTracker: wasApproved ? false : reqs[idx].syncedToLeaveTracker,
+  editedAt: new Date().toISOString(),
+  lastEditedBy: state.emp.id
+};
 
     await saveList('leaveRequests', reqs);
 
@@ -1506,11 +1509,12 @@ window.saveEditedLeaveRequest = async function(id) {
         type: `[UPDATED] ${type}`,
         from,
         to,
-        notes:
-          `UPDATED LEAVE REQUEST\n\n` +
-          `Previous request: ${old.type || ''}, ${old.from || ''} to ${old.to || ''}\n` +
-          `Previous notes: ${old.notes || 'None'}\n\n` +
-          `Updated notes: ${notes || 'None'}`,
+notes:
+  (wasApproved ? 'APPROVED LEAVE DATE CHANGE REQUEST\n\n' : 'UPDATED LEAVE REQUEST\n\n') +
+  `Previous request: ${old.type || ''}, ${old.from || ''} to ${old.to || ''}\n` +
+  `New request: ${type || ''}, ${from || ''} to ${to || ''}\n` +
+  `Previous notes: ${old.notes || 'None'}\n\n` +
+  `Updated notes: ${notes || 'None'}`,
         reason: notes,
         source: 'Staff Portal'
       }
@@ -1541,11 +1545,6 @@ window.cancelLeaveRequest = async function(id) {
 
   if (!lr) {
     toast('Could not find that leave request.', 'error');
-    return;
-  }
-
-  if (lr.status !== 'pending') {
-    toast('Only pending leave requests can be cancelled.', 'warning');
     return;
   }
 

@@ -77,10 +77,17 @@ const mappedClockEvents = (clockEvents.data || []).map(e => ({
   type: String(e.type || '').trim()
 }));
 
-  const mappedLeaveRequests = (leaveRequests.data || []).map(l => ({
-    ...l,
-    empId: l.emp_id
-  }));
+const mappedLeaveRequests = (leaveRequests.data || []).map(l => ({
+  ...l,
+  empId: l.emp_id,
+  changeRequested: l.change_requested,
+  previousFrom: l.previous_from,
+  previousTo: l.previous_to,
+  previousType: l.previous_type,
+  previousStatus: l.previous_status,
+  editedAt: l.edited_at,
+  lastEditedBy: l.last_edited_by
+}));
 
   const mappedOTRequests = (otRequests.data || []).map(o => ({
     ...o,
@@ -337,10 +344,25 @@ async function saveList(key, arr) {
       delete copy.otId;
     }
 
-    if (key === 'leaveRequests') {
-      copy.emp_id = copy.empId;
-      delete copy.empId;
-    }
+if (key === 'leaveRequests') {
+  copy.emp_id = copy.empId;
+  copy.change_requested = copy.changeRequested;
+  copy.previous_from = copy.previousFrom;
+  copy.previous_to = copy.previousTo;
+  copy.previous_type = copy.previousType;
+  copy.previous_status = copy.previousStatus;
+  copy.edited_at = copy.editedAt;
+  copy.last_edited_by = copy.lastEditedBy;
+
+  delete copy.empId;
+  delete copy.changeRequested;
+  delete copy.previousFrom;
+  delete copy.previousTo;
+  delete copy.previousType;
+  delete copy.previousStatus;
+  delete copy.editedAt;
+  delete copy.lastEditedBy;
+}
 
     if (key === 'otRequests') {
       copy.emp_id = copy.empId;

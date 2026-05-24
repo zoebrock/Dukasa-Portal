@@ -1295,12 +1295,10 @@ ${pending.length?pending.map(l=>`
         ${esc(FDS(l.from))} – ${esc(FDS(l.to))}
       </div>
 
-      ${l.status === 'pending' ? `
-        <div class="btn-row" style="margin-top:10px">
-          <button class="btn btn-secondary btn-sm" onclick="openEditLeaveRequest('${l.id}')">Edit</button>
-          <button class="btn btn-danger btn-sm" onclick="cancelLeaveRequest('${l.id}')">Cancel request</button>
-        </div>
-      ` : ''}
+<div class="btn-row" style="margin-top:10px">
+  <button class="btn btn-secondary btn-sm" onclick="openEditLeaveRequest('${l.id}')">Edit</button>
+  <button class="btn btn-danger btn-sm" onclick="cancelLeaveRequest('${l.id}')">Cancel request</button>
+</div>
 
     </div>
 
@@ -1309,15 +1307,20 @@ ${pending.length?pending.map(l=>`
 `).join(''):'<div class="helper-note">No pending requests.</div>'}
     <div class="section-label">History</div>
     <div class="info-grid">
-      ${hist.length?hist.map(l=>`
-        <div class="card list-card">
-          <div>
-            <div class="list-title">${esc(l.type)}</div>
-            <div class="list-copy">${esc(FDS(l.from))} – ${esc(FDS(l.to))}</div>
-            ${l.denialReason?`<div class="list-copy" style="color:#A32D2D;font-size:.78rem;margin-top:3px">Reason: ${esc(l.denialReason)}</div>`:''}
-          </div>
-          ${badge(l.status)}
-        </div>`).join(''):'<div class="helper-note">No leave history.</div>'}
+${hist.length?hist.map(l=>`
+  <div class="card list-card">
+    <div>
+      <div class="list-title">${esc(l.type)}</div>
+      <div class="list-copy">${esc(FDS(l.from))} – ${esc(FDS(l.to))}</div>
+      ${l.denialReason?`<div class="list-copy" style="color:#A32D2D;font-size:.78rem;margin-top:3px">Reason: ${esc(l.denialReason)}</div>`:''}
+
+      <div class="btn-row" style="margin-top:10px">
+        <button class="btn btn-secondary btn-sm" onclick="openEditLeaveRequest('${l.id}')">Edit</button>
+        <button class="btn btn-danger btn-sm" onclick="cancelLeaveRequest('${l.id}')">Cancel request</button>
+      </div>
+    </div>
+    ${badge(l.status)}
+  </div>`).join(''):'<div class="helper-note">No leave history.</div>'}
     </div>
     <div class="section-label">Sick days &amp; medical certificates</div>
     <div class="info-grid">

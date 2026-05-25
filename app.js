@@ -58,13 +58,17 @@ async function getAllData() {
   if (medCerts.error) throw new Error(medCerts.error.message);
   if (announcements.error) throw new Error(announcements.error.message);
 
-  const mappedShifts = (shifts.data || []).map(s => ({
-    ...s,
-    empId: s.emp_id,
-    breakMin: s.break_min,
-    isOT: s.is_ot,
-    otId: s.ot_id
-  }));
+const mappedShifts = (shifts.data || []).map(s => ({
+  ...s,
+  empId: s.emp_id,
+  breakMin: s.break_min,
+  paidBreakMin: s.paid_break_min,
+  isOT: s.is_ot,
+  otId: s.ot_id,
+  entryType: s.entry_type,
+  leaveType: s.leave_type,
+  leaveReason: s.leave_reason
+}));
 
 const mappedClockEvents = (clockEvents.data || []).map(e => ({
   ...e,
@@ -625,6 +629,13 @@ function renderHome() {
   console.log('My published shifts: '+myPub.length);
   if(myPub.length>0) console.log('Sample: '+JSON.stringify(myPub[0]));
   const shifts   = getList('shifts').filter(s=>s.empId===emp.id&&s.published);
+  const partialLeaves = shifts.filter(s =>
+  s.entryType === 'leave' || s.entry_type === 'leave'
+);
+
+const normalShifts = shifts.filter(s =>
+  !(s.entryType === 'leave' || s.entry_type === 'leave')
+);
   const sick     = getList('sickDays').filter(s=>s.empId===emp.id);
   const leaves   = getList('leaveRequests').filter(l=>l.empId===emp.id);
   const medCerts = getList('medCerts').filter(m=>m.empId===emp.id);
@@ -638,7 +649,8 @@ const outstandingMC = sick.find(s =>
   const td       = today();
   const ws       = weekStart(0);
 
-  const todayShift = shifts.find(s=>s.date===td);
+  const todayShift = normalShifts.find(s=>s.date===td);
+  const todayPartialLeaves = partialLeaves.filter(s=>s.date===td);
   const todaySick  = sick.find(s=>s.date===td);
   const todayLeave = leaves.find(l=>l.status==='approved'&&l.from<=td&&l.to>=td);
 
@@ -802,6 +814,15 @@ const h = shiftHrs(todayShift);
       <div style="font-size:.72rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#534AB7;margin-bottom:4px">Today's shift</div>
       <div style="font-family:'DM Serif Display',Georgia,serif;font-size:1.9rem;letter-spacing:-.03em;color:#181816">${esc(todayShift.start)} – ${esc(todayShift.end)}</div>
       <div class="list-copy" style="margin-top:3px">${breakLine} · ${h.toFixed(1)} hrs</div>
+      ${todayPartialLeaves.length ? `
+  <div style="margin-top:10px">
+    ${todayPartialLeaves.map(pl=>`
+      <div style="font-size:.82rem;font-weight:600;background:#FAECE7;color:#712B13;border-radius:10px;padding:6px 9px;margin-top:5px">
+        Partial leave - ${esc(pl.leaveType || pl.leave_type || pl.status || 'Leave')}: ${esc(pl.start)}–${esc(pl.end)}
+      </div>
+    `).join('')}
+  </div>
+` : ''}
     </div>`;
   } else {
     todayCard=`<div class="card card-compact"><span class="helper-note">No shift scheduled today.</span></div>`;
@@ -1294,6 +1315,13 @@ function renderLeave() {
   const mcs    = getList('medCerts').filter(m=>m.empId===emp.id);
   const pending= reqs.filter(l=>l.status==='pending');
   const hist   = reqs.filter(l=>l.status!=='pending');
+  const partialLeaves = getList('shifts')
+  .filter(s =>
+    s.empId === emp.id &&
+    s.published &&
+    (s.entryType === 'leave' || s.entry_type === 'leave')
+  )
+  .sort((a,b)=>(b.date||'').localeCompare(a.date||''));
 
   const badge = s => {
     if (s==='approved') return `<span class="badge badge-green">approved</span>`;
@@ -1307,6 +1335,21 @@ function renderLeave() {
       <button class="btn btn-primary" onclick="openLeaveForm()">+ Request leave</button>
     </div>
     <div id="lv-form"></div>
+    ${partialLeaves.length ? `
+  <div class="section-label">Approved partial leave</div>
+  <div class="info-grid">
+    ${partialLeaves.map(pl=>`
+      <div class="card list-card" style="border-left:4px solid #993C1D;background:#FAECE7">
+        <div>
+          <div class="list-title">Partial leave - ${esc(pl.leaveType || pl.leave_type || pl.status || 'Leave')}</div>
+          <div class="list-copy">${esc(FDS(pl.date))} · ${esc(pl.start)}–${esc(pl.end)}</div>
+          ${pl.leaveReason || pl.leave_reason ? `<div class="list-copy" style="margin-top:3px">${esc(pl.leaveReason || pl.leave_reason)}</div>` : ''}
+        </div>
+        <span class="badge badge-amber">approved</span>
+      </div>
+    `).join('')}
+  </div>
+` : ''}
     <div class="section-label">Pending requests</div>
 ${pending.length?pending.map(l=>`
   <div class="card list-card" style="margin-bottom:0">

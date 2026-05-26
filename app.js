@@ -90,11 +90,11 @@ const mappedLeaveRequests = (leaveRequests.data || []).map(l => ({
   previousType: l.previous_type,
   previousStatus: l.previous_status,
   editedAt: l.edited_at,
-  lastEditedBy: l.last_edited_by
+  lastEditedBy: l.last_edited_by,
   requestKind: l.request_kind,
-partialStart: l.partial_start,
-partialEnd: l.partial_end,
-medicalCertificateRequired: l.medical_certificate_required
+  partialStart: l.partial_start,
+  partialEnd: l.partial_end,
+  medicalCertificateRequired: l.medical_certificate_required
 }));
 
   const mappedOTRequests = (otRequests.data || []).map(o => ({

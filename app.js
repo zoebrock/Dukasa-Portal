@@ -91,6 +91,10 @@ const mappedLeaveRequests = (leaveRequests.data || []).map(l => ({
   previousStatus: l.previous_status,
   editedAt: l.edited_at,
   lastEditedBy: l.last_edited_by
+  requestKind: l.request_kind,
+partialStart: l.partial_start,
+partialEnd: l.partial_end,
+medicalCertificateRequired: l.medical_certificate_required
 }));
 
   const mappedOTRequests = (otRequests.data || []).map(o => ({
@@ -349,23 +353,41 @@ async function saveList(key, arr) {
     }
 
 if (key === 'leaveRequests') {
+
   copy.emp_id = copy.empId;
+
   copy.change_requested = copy.changeRequested;
   copy.previous_from = copy.previousFrom;
   copy.previous_to = copy.previousTo;
   copy.previous_type = copy.previousType;
   copy.previous_status = copy.previousStatus;
+
   copy.edited_at = copy.editedAt;
   copy.last_edited_by = copy.lastEditedBy;
 
+  // ── PARTIAL LEAVE SUPPORT ─────────────────────
+  copy.request_kind = copy.requestKind || 'full_day';
+  copy.partial_start = copy.partialStart || null;
+  copy.partial_end = copy.partialEnd || null;
+  copy.medical_certificate_required =
+    copy.medicalCertificateRequired || false;
+
   delete copy.empId;
+
   delete copy.changeRequested;
   delete copy.previousFrom;
   delete copy.previousTo;
   delete copy.previousType;
   delete copy.previousStatus;
+
   delete copy.editedAt;
   delete copy.lastEditedBy;
+
+  // ── REMOVE CAMELCASE BEFORE SUPABASE SAVE ────
+  delete copy.requestKind;
+  delete copy.partialStart;
+  delete copy.partialEnd;
+  delete copy.medicalCertificateRequired;
 }
 
     if (key === 'otRequests') {
@@ -1409,14 +1431,43 @@ window.openLeaveForm = function() {
   c.innerHTML=`
     <div class="card" style="margin-bottom:14px">
       <div style="font-family:'DM Serif Display',Georgia,serif;font-size:1.3rem;margin-bottom:16px">New leave request</div>
+
       <div class="form-grid">
         <div class="input-wrap"><label>Leave type</label>
-          <select class="select" id="lv-t"><option>Annual Leave</option><option>Sick Leave</option><option>Personal Leave</option><option>Carers Leave</option><option>Unpaid Leave</option></select>
+          <select class="select" id="lv-t" onchange="togglePartialMCNotice()">
+            <option>Annual Leave</option>
+            <option>Sick Leave</option>
+            <option>Personal Leave</option>
+            <option>Carers Leave</option>
+            <option>Unpaid Leave</option>
+          </select>
         </div>
+
+        <div class="input-wrap"><label>Request type</label>
+          <select class="select" id="lv-kind" onchange="togglePartialLeaveFields()">
+            <option value="full_day">Full day / date range</option>
+            <option value="partial_day">Partial day</option>
+          </select>
+        </div>
+
         <div class="input-wrap"><label>From</label><input class="input" id="lv-f" type="date"></div>
         <div class="input-wrap"><label>To</label><input class="input" id="lv-to" type="date"></div>
-        <div class="input-wrap full-span"><label>Notes (optional)</label><textarea class="textarea" id="lv-n" placeholder="Any additional context..."></textarea></div>
-        <div id="lv-err" style="display:none;color:#A32D2D;font-size:.82rem" class="full-span">⚠ Please enter valid from and to dates.</div>
+
+        <div id="lv-partial-fields" class="full-span" style="display:none">
+          <div class="form-grid">
+            <div class="input-wrap"><label>Leave start</label><input class="input" id="lv-ps" type="time"></div>
+            <div class="input-wrap"><label>Leave end</label><input class="input" id="lv-pe" type="time"></div>
+          </div>
+        </div>
+
+        <div id="lv-mc-note" class="full-span" style="display:none;background:#FCEBEB;color:#791F1F;border-radius:12px;padding:10px 12px;font-size:.84rem">
+          Medical certificate required. After submitting, please upload your certificate below.
+        </div>
+
+        <div class="input-wrap full-span"><label>Notes (optional)</label><textarea class="textarea" id="lv-n" placeholder="Any additional context."></textarea></div>
+
+        <div id="lv-err" style="display:none;color:#A32D2D;font-size:.82rem" class="full-span">⚠ Please enter valid leave details.</div>
+
         <div class="btn-row full-span">
           <button class="btn btn-secondary" onclick="qs('#lv-form').innerHTML=''">Cancel</button>
           <button class="btn btn-primary" id="lv-submit" onclick="submitLeave()">Submit request</button>
@@ -1425,47 +1476,131 @@ window.openLeaveForm = function() {
     </div>`;
 };
 
+window.togglePartialLeaveFields = function(){
+  const kind = qs('#lv-kind')?.value;
+  const box = qs('#lv-partial-fields');
+
+  if(box) box.style.display = kind === 'partial_day' ? 'block' : 'none';
+
+  if(kind === 'partial_day'){
+    const from = qs('#lv-f')?.value;
+    if(from && qs('#lv-to')) qs('#lv-to').value = from;
+  }
+
+  togglePartialMCNotice();
+};
+
+window.togglePartialMCNotice = function(){
+  const type = qs('#lv-t')?.value;
+  const kind = qs('#lv-kind')?.value;
+  const note = qs('#lv-mc-note');
+
+  if(note) {
+    note.style.display =
+      type === 'Sick Leave' && kind === 'partial_day'
+        ? 'block'
+        : 'none';
+  }
+};
+
 window.submitLeave = async function() {
-  const type=qs('#lv-t')?.value, from=qs('#lv-f')?.value, to=qs('#lv-to')?.value, notes=(qs('#lv-n')?.value||'').trim();
-  const errEl=qs('#lv-err');
-  const btn=qs('#lv-submit');
-  if (!from||!to||from>to){ if(errEl) errEl.style.display='block'; return; }
-  if (errEl) errEl.style.display='none';
-  if (btn) { btn.disabled=true; btn.textContent='Submitting...'; }
-  const reqs=getList('leaveRequests');
-  reqs.push({id:'lr'+Date.now(),empId:state.emp.id,type,from,to,notes,status:'pending',submitted:new Date().toISOString()});
-try {
-  await saveList('leaveRequests', reqs);
+  const type = qs('#lv-t')?.value;
+  const kind = qs('#lv-kind')?.value || 'full_day';
+  const from = qs('#lv-f')?.value;
+  const to = kind === 'partial_day' ? from : qs('#lv-to')?.value;
+  const partialStart = qs('#lv-ps')?.value || '';
+  const partialEnd = qs('#lv-pe')?.value || '';
+  const notes = (qs('#lv-n')?.value || '').trim();
 
-  // Fire email notification without awaiting — don't block UI
-  gasPost({
-    action: 'sendEmail',
-    fn: 'sendLeaveRequestNotification',
-    payload: {
-      empId: state.emp.id,
-      empName: `${state.emp.first || ''} ${state.emp.last || ''}`.trim(),
-      empFirst: state.emp.first || '',
-      empLast: state.emp.last || '',
-      empEmail: state.emp.email || '',
-      empRole: state.emp.role || '',
-      type,
-      from,
-      to,
-      notes,
-      reason: notes,
-      source: 'Staff Portal'
+  const errEl = qs('#lv-err');
+  const btn = qs('#lv-submit');
+
+  const badFull = !from || !to || from > to;
+  const badPartial = kind === 'partial_day' && (!from || !partialStart || !partialEnd || partialStart >= partialEnd);
+
+  if (badFull || badPartial) {
+    if(errEl) errEl.style.display = 'block';
+    return;
+  }
+
+  if(errEl) errEl.style.display = 'none';
+  if(btn) {
+    btn.disabled = true;
+    btn.textContent = 'Submitting...';
+  }
+
+  const reqs = getList('leaveRequests');
+
+  const newReq = {
+    id: 'lr' + Date.now(),
+    empId: state.emp.id,
+    type,
+    from,
+    to,
+    notes,
+    status: 'pending',
+    submitted: new Date().toISOString(),
+
+    requestKind: kind,
+    partialStart: kind === 'partial_day' ? partialStart : null,
+    partialEnd: kind === 'partial_day' ? partialEnd : null,
+    medicalCertificateRequired: type === 'Sick Leave' && kind === 'partial_day'
+  };
+
+  reqs.push(newReq);
+
+  try {
+    await saveList('leaveRequests', reqs);
+
+    gasPost({
+      action: 'sendEmail',
+      fn: 'sendLeaveRequestNotification',
+      payload: {
+        empId: state.emp.id,
+        empName: `${state.emp.first || ''} ${state.emp.last || ''}`.trim(),
+        empFirst: state.emp.first || '',
+        empLast: state.emp.last || '',
+        empEmail: state.emp.email || '',
+        empRole: state.emp.role || '',
+        type: kind === 'partial_day' ? `[PARTIAL] ${type}` : type,
+        from,
+        to,
+        notes:
+          kind === 'partial_day'
+            ? `PARTIAL LEAVE REQUEST\n\nType: ${type}\nDate: ${from}\nTime: ${partialStart}–${partialEnd}\nNotes: ${notes || 'None'}`
+            : notes,
+        reason: notes,
+        source: 'Staff Portal'
+      }
+    }).catch(err => console.warn('Leave email failed (non-critical):', err));
+
+    if(qs('#lv-form')) qs('#lv-form').innerHTML = '';
+
+    const fresh = await getAllData();
+    if(fresh.ok) state.allData = fresh.data || state.allData;
+
+    renderLeave();
+    renderHome();
+
+    toast(
+      type === 'Sick Leave' && kind === 'partial_day'
+        ? 'Partial sick leave submitted. Please upload your medical certificate. ✓'
+        : 'Leave request submitted! Your manager has been notified. ✓',
+      'success',
+      6000
+    );
+
+    if(type === 'Sick Leave' && kind === 'partial_day'){
+      openMC(newReq.id, from);
     }
-  })
-    .catch(err=>console.warn('Leave email failed (non-critical):',err));
 
-  if(qs('#lv-form')) qs('#lv-form').innerHTML='';
-  renderLeave();
-  toast('Leave request submitted! Your manager has been notified. ✓','success',5000);
-
-} catch(e){
-  if (btn) { btn.disabled=false; btn.textContent='Submit request'; }
-  toast('Could not submit — please try again.','error');
-}
+  } catch(e) {
+    if(btn) {
+      btn.disabled = false;
+      btn.textContent = 'Submit request';
+    }
+    toast('Could not submit leave request: ' + e.message, 'error', 6000);
+  }
 };
 
 window.openEditLeaveRequest = function(id) {

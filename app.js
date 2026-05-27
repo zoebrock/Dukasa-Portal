@@ -100,13 +100,16 @@ const mappedLeaveRequests = (leaveRequests.data || []).map(l => ({
   medicalCertificateRequired: l.medical_certificate_required
 }));
 
-  const mappedOTRequests = (otRequests.data || []).map(o => ({
-    ...o,
-    empId: o.emp_id,
-    requestedBy: o.requested_by,
-    staffRead: o.staff_read,
-    availConfirmed: o.avail_confirmed
-  }));
+const mappedOTRequests = (otRequests.data || []).map(o => ({
+  ...o,
+  empId: o.emp_id,
+  requestedBy: o.requested_by,
+  staffRead: o.staff_read,
+  availConfirmed: o.avail_confirmed,
+  staffConfirmed: o.staff_confirmed,
+  staffDenialReason: o.staff_denial_reason,
+  task: o.task || ''
+}));
 
   const mappedSickDays = (sickDays.data || []).map(s => ({
     ...s,
@@ -1996,6 +1999,15 @@ function renderOT() {
   const badge = o => {
     if (o.approved === true) return `<span class="badge badge-green">Approved</span>`;
     if (o.approved === false) return `<span class="badge badge-red">Denied</span>`;
+
+    if (
+      o.requestedBy === 'manager' &&
+      o.availConfirmed !== true &&
+      o.staffConfirmed !== false
+    ) {
+      return `<span class="badge badge-amber">Awaiting your response</span>`;
+    }
+
     return `<span class="badge badge-amber">Pending</span>`;
   };
 
@@ -2012,18 +2024,230 @@ function renderOT() {
 
     <div class="section-label">My OT requests</div>
     <div class="info-grid">
-      ${reqs.length ? reqs.map(o => `
-        <div class="card list-card">
-          <div>
-            <div class="list-title">${esc(FDS(o.date))} · ${esc(o.start || '')} – ${esc(o.end || '')}</div>
-            ${o.reason ? `<div class="list-copy">${esc(o.reason)}</div>` : ''}
+      ${reqs.length ? reqs.map(o => {
+        const needsStaffResponse =
+          o.requestedBy === 'manager' &&
+          o.availConfirmed !== true &&
+          o.approved !== true &&
+          o.approved !== false;
+
+        return `
+          <div class="card list-card">
+            <div style="flex:1;min-width:0">
+              <div class="list-title">${esc(FDS(o.date))} · ${esc(o.start || '')} – ${esc(o.end || '')}</div>
+              ${o.reason ? `<div class="list-copy">${esc(o.reason)}</div>` : ''}
+              ${o.task ? `<div class="list-copy">Task: ${esc(o.task)}</div>` : ''}
+              ${o.staffDenialReason ? `<div class="list-copy" style="color:#A32D2D">Declined reason: ${esc(o.staffDenialReason)}</div>` : ''}
+            </div>
+
+            <div style="display:flex;flex-direction:column;gap:7px;align-items:flex-end">
+              ${badge(o)}
+
+              ${needsStaffResponse ? `
+                <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">
+                  <button class="btn btn-primary btn-sm" type="button" onclick="respondManagerOT('${o.id}', true)">
+                    Approve
+                  </button>
+                  <button class="btn btn-secondary btn-sm" type="button" onclick="respondManagerOT('${o.id}', false)">
+                    Decline
+                  </button>
+                </div>
+              ` : ''}
+            </div>
           </div>
-          ${badge(o)}
-        </div>
-      `).join('') : '<div class="helper-note">No OT requests yet.</div>'}
+        `;
+      }).join('') : '<div class="helper-note">No OT requests yet.</div>'}
     </div>
   `;
 }
+
+async function applyApprovedOTToShift(ot) {
+  const shifts = getList('shifts');
+
+  const shiftIdx = shifts.findIndex(s =>
+    s.empId === ot.empId &&
+    s.date === ot.date &&
+    !s.isOT
+  );
+
+  if (shiftIdx >= 0) {
+    const s = shifts[shiftIdx];
+
+    const origStart = s.otOriginalStart || s.start;
+    const origEnd = s.otOriginalEnd || s.end;
+
+    const newStart = ot.start < origStart ? ot.start : origStart;
+    const newEnd = ot.end > origEnd ? ot.end : origEnd;
+
+    const annotations = Array.isArray(s.otAnnotations)
+      ? [...s.otAnnotations]
+      : [];
+
+    if (!annotations.find(a => a.otId === ot.id)) {
+      annotations.push({
+        otId: ot.id,
+        start: ot.start,
+        end: ot.end,
+        reason: ot.reason || ''
+      });
+    }
+
+    const updatedShift = {
+      ...s,
+      start: newStart,
+      end: newEnd,
+      otOriginalStart: origStart,
+      otOriginalEnd: origEnd,
+      otAnnotations: annotations
+    };
+
+    const dbRow = {
+      id: updatedShift.id,
+      emp_id: updatedShift.empId,
+      date: updatedShift.date,
+      start: updatedShift.start,
+      end: updatedShift.end,
+      break_min: updatedShift.breakMin || 30,
+      paid_break_min: updatedShift.paidBreakMin || 0,
+      role: updatedShift.role || '',
+      notes: updatedShift.notes || '',
+      published: updatedShift.published === true,
+      status: updatedShift.status || '',
+      is_ot: updatedShift.isOT || false,
+      ot_id: updatedShift.otId || null,
+      ot_original_start: updatedShift.otOriginalStart,
+      ot_original_end: updatedShift.otOriginalEnd,
+      ot_annotations: updatedShift.otAnnotations || []
+    };
+
+    const { error } = await supabase
+      .from('shifts')
+      .upsert(dbRow, { onConflict: 'id' });
+
+    if (error) throw error;
+
+  } else {
+    const staff = getList('staff');
+    const emp = staff.find(s => String(s.id) === String(ot.empId));
+
+    const dbRow = {
+      id: 'sh-ot-' + Date.now(),
+      emp_id: ot.empId,
+      date: ot.date,
+      start: ot.start,
+      end: ot.end,
+      break_min: 0,
+      paid_break_min: 0,
+      role: emp ? emp.role : '',
+      notes: 'OT: ' + (ot.reason || ''),
+      published: true,
+      status: 'ot',
+      is_ot: true,
+      ot_id: ot.id,
+      ot_annotations: [{
+        otId: ot.id,
+        start: ot.start,
+        end: ot.end,
+        reason: ot.reason || ''
+      }]
+    };
+
+    const { error } = await supabase
+      .from('shifts')
+      .upsert(dbRow, { onConflict: 'id' });
+
+    if (error) throw error;
+  }
+}
+
+window.respondManagerOT = async function(id, accepted) {
+  const reqs = getList('otRequests');
+  const ot = reqs.find(o => o.id === id && o.empId === state.emp.id);
+
+  if (!ot) {
+    toast('Could not find this OT request.', 'error');
+    return;
+  }
+
+  let denialReason = '';
+
+  if (!accepted) {
+    denialReason = prompt('Please provide a reason for declining this OT request:') || '';
+
+    if (!denialReason.trim()) {
+      toast('A reason is required to decline OT.', 'warning');
+      return;
+    }
+  }
+
+  try {
+    const update = accepted
+      ? {
+          staff_confirmed: true,
+          avail_confirmed: true,
+          approved: true,
+          staff_denial_reason: null
+        }
+      : {
+          staff_confirmed: false,
+          avail_confirmed: false,
+          approved: false,
+          staff_denial_reason: denialReason.trim()
+        };
+
+    const { error } = await supabase
+      .from('ot_requests')
+      .update(update)
+      .eq('id', id)
+      .eq('emp_id', state.emp.id);
+
+    if (error) throw error;
+
+    if (accepted) {
+      await applyApprovedOTToShift({
+        ...ot,
+        staffConfirmed: true,
+        availConfirmed: true,
+        approved: true
+      });
+    }
+
+    await gasPost({
+      action: 'sendEmail',
+      fn: 'sendOTDecisionEmail',
+      payload: {
+        empId: state.emp.id,
+        decision: accepted ? 'approved' : 'declined',
+        date: ot.date,
+        start: ot.start,
+        end: ot.end,
+        reason: accepted ? (ot.reason || '') : denialReason.trim(),
+        source: 'Staff Portal'
+      }
+    }).catch(err => console.warn('OT response email failed:', err));
+
+    const fresh = await getAllData();
+    if (fresh.ok) state.allData = fresh.data || state.allData;
+
+    renderOT();
+    renderRoster();
+    renderHome();
+
+    toast(
+      accepted
+        ? 'OT approved and added to your roster. ✓'
+        : 'OT declined. Your manager has been notified.',
+      accepted ? 'success' : 'info',
+      5000
+    );
+
+  } catch (e) {
+    console.error('OT response failed:', e);
+    toast('Could not submit OT response: ' + e.message, 'error', 6000);
+  }
+};
+
+
 
 window.openOTForm = function() {
   const c = qs('#ot-form');

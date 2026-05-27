@@ -65,6 +65,9 @@ const mappedShifts = (shifts.data || []).map(s => ({
   paidBreakMin: s.paid_break_min,
   isOT: s.is_ot,
   otId: s.ot_id,
+  otOriginalStart: s.ot_original_start,
+  otOriginalEnd: s.ot_original_end,
+  otAnnotations: s.ot_annotations || [],
   entryType: s.entry_type,
   leaveType: s.leave_type,
   leaveReason: s.leave_reason
@@ -1117,11 +1120,25 @@ function renderRoster() {
           myStatus='Sick'; chipStyle='background:#FCEBEB;color:#791F1F;';
         } else if (d.myLeave) {
           myStatus=d.myLeave.type.replace(' Leave',''); chipStyle='background:#FAEEDA;color:#633806;';
-        } else if (d.myShift) {
-myStatus=`${d.myShift.start}–${d.myShift.end}`;
-myTime=shiftHrs(d.myShift).toFixed(1)+'h';
-          chipStyle='background:#EEEDFE;color:#534AB7;';
-        }
+        else if (d.myShift) {
+
+  const hasOT = d.myShift?.otAnnotations?.length;
+
+  myStatus = `${d.myShift.start}–${d.myShift.end}`;
+  myTime = shiftHrs(d.myShift).toFixed(1) + 'h';
+
+  const otDesc = hasOT
+    ? `<div style="font-size:.72rem;color:#3B6D11;margin-top:4px">
+        OT approved: ${d.myShift.otAnnotations
+          .map(o => `${o.start}–${o.end}`)
+          .join(', ')}
+      </div>`
+    : '';
+
+  chipStyle='background:#EEEDFE;color:#534AB7;';
+
+  d.otDesc = otDesc;
+}
 
         // Count total staff on this day (for the badge)
         const allShiftsDay = getList('shifts').filter(s=>s.date===d.ds&&s.published);
@@ -1143,6 +1160,7 @@ myTime=shiftHrs(d.myShift).toFixed(1)+'h';
             <div style="flex:1;min-width:0">
               ${chipStyle?`<span style="font-size:.78rem;font-weight:600;padding:2px 9px;border-radius:12px;${chipStyle}">${esc(myStatus)}</span>`:`<span style="font-size:.82rem;color:#98988f">Off</span>`}
               ${myTime?`<span style="font-size:.75rem;color:#58584e;margin-left:6px">${myTime}</span>`:''}
+              ${d.otDesc || ''}
               ${d.myShift&&d.isToday?`<div style="margin-top:6px"><button class="btn btn-secondary btn-sm" style="font-size:.75rem" onclick="event.stopPropagation();openLate()">⏱ Running late?</button></div>`:''}
             </div>
             <!-- Team count badge + chevron -->

@@ -1115,29 +1115,31 @@ function renderRoster() {
         const num  = dObj.getDate();
         const mon  = dObj.toLocaleDateString('en-AU',{month:'short'});
 
-        let myStatus='Off', myTime='', chipStyle='';
-        if (d.mySick) {
-          myStatus='Sick'; chipStyle='background:#FCEBEB;color:#791F1F;';
-        } else if (d.myLeave) {
-          myStatus=d.myLeave.type.replace(' Leave',''); chipStyle='background:#FAEEDA;color:#633806;';
-        else if (d.myShift) {
+let myStatus='Off', myTime='', chipStyle='';
 
-  const hasOT = d.myShift?.otAnnotations?.length;
+if (d.mySick) {
+  myStatus='Sick';
+  chipStyle='background:#FCEBEB;color:#791F1F;';
 
-  myStatus = `${d.myShift.start}–${d.myShift.end}`;
+} else if (d.myLeave) {
+  myStatus=d.myLeave.type.replace(' Leave','');
+  chipStyle='background:#FAEEDA;color:#633806;';
+
+} else if (d.myShift) {
+  const otAnnotations = Array.isArray(d.myShift.otAnnotations)
+    ? d.myShift.otAnnotations
+    : [];
+
+  myStatus = d.myShift.start + '–' + d.myShift.end;
   myTime = shiftHrs(d.myShift).toFixed(1) + 'h';
 
-  const otDesc = hasOT
-    ? `<div style="font-size:.72rem;color:#3B6D11;margin-top:4px">
-        OT approved: ${d.myShift.otAnnotations
-          .map(o => `${o.start}–${o.end}`)
-          .join(', ')}
-      </div>`
+  d.otDesc = otAnnotations.length
+    ? '<div style="font-size:.72rem;color:#3B6D11;margin-top:4px">OT approved: ' +
+        otAnnotations.map(o => (o.start || '') + '–' + (o.end || '')).join(', ') +
+      '</div>'
     : '';
 
   chipStyle='background:#EEEDFE;color:#534AB7;';
-
-  d.otDesc = otDesc;
 }
 
         // Count total staff on this day (for the badge)

@@ -1122,7 +1122,7 @@ if (d.mySick) {
   chipStyle='background:#FCEBEB;color:#791F1F;';
 
 } else if (d.myLeave) {
-  myStatus=d.myLeave.type.replace(' Leave','');
+  myStatus=(d.myLeave.type || 'Leave').replace(' Leave','');
   chipStyle='background:#FAEEDA;color:#633806;';
 
 } else if (d.myShift) {
@@ -1130,12 +1130,12 @@ if (d.mySick) {
     ? d.myShift.otAnnotations
     : [];
 
-  myStatus = d.myShift.start + '–' + d.myShift.end;
+  myStatus = (d.myShift.start || '') + '–' + (d.myShift.end || '');
   myTime = shiftHrs(d.myShift).toFixed(1) + 'h';
 
   d.otDesc = otAnnotations.length
     ? '<div style="font-size:.72rem;color:#3B6D11;margin-top:4px">OT approved: ' +
-        otAnnotations.map(o => (o.start || '') + '–' + (o.end || '')).join(', ') +
+      otAnnotations.map(o => (o.start || '') + '–' + (o.end || '')).join(', ') +
       '</div>'
     : '';
 

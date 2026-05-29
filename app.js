@@ -2068,7 +2068,7 @@ window.submitMC = async function() {
 function renderOT() {
   const emp = state.emp;
   const reqs = getList('otRequests')
-    .filter(o => o.empId === emp.id)
+    .filter(o => String(o.empId) === String(emp.id))
     .sort((a,b) => (b.date || "").localeCompare(a.date || ""));
 
   const badge = o => {

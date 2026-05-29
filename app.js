@@ -200,6 +200,17 @@ function addDays(iso,n) {
   const d = new Date(iso+'T00:00:00'); d.setDate(d.getDate()+n);
   return localISO(d);
 }
+function datesBetween(from, to) {
+  const out = [];
+  let d = from;
+
+  while (d <= to) {
+    out.push(d);
+    d = addDays(d, 1);
+  }
+
+  return out;
+}
 function getList(key) {
   try {
     const arr = JSON.parse(state.allData['rx3_'+key]||'[]');
@@ -328,14 +339,15 @@ async function gasPost(body = {}) {
 async function saveList(key, arr) {
   state.allData['rx3_' + key] = JSON.stringify(arr);
 
-  const tableMap = {
-    staff: 'staff',
-    shifts: 'shifts',
-    clockEvents: 'clock_events',
-    leaveRequests: 'leave_requests',
-    otRequests: 'ot_requests',
-    medCerts: 'med_certs'
-  };
+const tableMap = {
+  staff: 'staff',
+  shifts: 'shifts',
+  clockEvents: 'clock_events',
+  leaveRequests: 'leave_requests',
+  otRequests: 'ot_requests',
+  sickDays: 'sick_days',
+  medCerts: 'med_certs'
+};
 
   const table = tableMap[key];
   if (!table) return;
@@ -407,20 +419,48 @@ if (key === 'leaveRequests') {
       delete copy.availConfirmed;
     }
 
-    if (key === 'medCerts') {
+    if (key === 'sickDays') {
       copy.emp_id = copy.empId;
-      copy.sick_id = copy.sickId;
-      copy.file_name = copy.fileName;
-      copy.file_type = copy.fileType;
-      copy.uploaded_at = copy.uploadedAt;
-      copy.manager_notified = copy.managerNotified;
+      copy.shift_id = copy.shiftId || null;
+      copy.med_cert_id = copy.medCertId || null;
+      copy.mc_uploaded = copy.mcUploaded || false;
+
       delete copy.empId;
-      delete copy.sickId;
-      delete copy.fileName;
-      delete copy.fileType;
-      delete copy.uploadedAt;
-      delete copy.managerNotified;
+      delete copy.shiftId;
+      delete copy.medCertId;
+      delete copy.mcUploaded;
     }
+
+if (key === 'medCerts') {
+  copy.emp_id = copy.empId;
+  copy.sick_id = copy.sickId;
+  copy.file_name = copy.fileName;
+  copy.file_type = copy.fileType;
+  copy.file_id = copy.fileId;
+  copy.file_url = copy.fileUrl;
+  copy.download_url = copy.downloadUrl;
+  copy.drive_folder_id = copy.driveFolderId;
+  copy.uploaded_at = copy.uploadedAt;
+  copy.manager_notified = copy.managerNotified;
+  copy.sick_day_ids = copy.sickDayIds || [];
+
+  delete copy.empId;
+  delete copy.sickId;
+  delete copy.fileName;
+  delete copy.fileType;
+  delete copy.fileId;
+  delete copy.fileUrl;
+  delete copy.downloadUrl;
+  delete copy.driveFolderId;
+  delete copy.uploadedAt;
+  delete copy.managerNotified;
+  delete copy.sickDayIds;
+
+  delete copy.file_id;
+  delete copy.file_url;
+  delete copy.drive_folder_id;
+  delete copy.download_url;
+}
 
     return copy;
   });
@@ -1542,12 +1582,12 @@ window.submitLeave = async function() {
   const badPartial = kind === 'partial_day' && (!from || !partialStart || !partialEnd || partialStart >= partialEnd);
 
   if (badFull || badPartial) {
-    if(errEl) errEl.style.display = 'block';
+    if (errEl) errEl.style.display = 'block';
     return;
   }
 
-  if(errEl) errEl.style.display = 'none';
-  if(btn) {
+  if (errEl) errEl.style.display = 'none';
+  if (btn) {
     btn.disabled = true;
     btn.textContent = 'Submitting...';
   }
@@ -1563,17 +1603,49 @@ window.submitLeave = async function() {
     notes,
     status: 'pending',
     submitted: new Date().toISOString(),
-
     requestKind: kind,
     partialStart: kind === 'partial_day' ? partialStart : null,
     partialEnd: kind === 'partial_day' ? partialEnd : null,
-    medicalCertificateRequired: type === 'Sick Leave' && kind === 'partial_day'
+    medicalCertificateRequired: type === 'Sick Leave'
   };
 
   reqs.push(newReq);
 
   try {
     await saveList('leaveRequests', reqs);
+
+    let createdSickDays = [];
+
+    if (type === 'Sick Leave') {
+      const shifts = getList('shifts').filter(s =>
+        s.empId === state.emp.id &&
+        s.published &&
+        s.date >= from &&
+        s.date <= to
+      );
+
+      const existingSick = getList('sickDays');
+      const sickDays = [...existingSick];
+
+      createdSickDays = shifts
+        .filter(s => !existingSick.some(sk => sk.empId === state.emp.id && sk.date === s.date))
+        .map(s => ({
+          id: 'sk' + Date.now() + Math.random().toString(36).slice(2, 7),
+          empId: state.emp.id,
+          date: s.date,
+          shiftId: s.id,
+          medCertId: null,
+          mcUploaded: false,
+          notes,
+          ts: new Date().toISOString()
+        }));
+
+      sickDays.push(...createdSickDays);
+
+      if (createdSickDays.length) {
+        await saveList('sickDays', sickDays);
+      }
+    }
 
     gasPost({
       action: 'sendEmail',
@@ -1588,37 +1660,35 @@ window.submitLeave = async function() {
         type: kind === 'partial_day' ? `[PARTIAL] ${type}` : type,
         from,
         to,
-        notes:
-          kind === 'partial_day'
-            ? `PARTIAL LEAVE REQUEST\n\nType: ${type}\nDate: ${from}\nTime: ${partialStart}–${partialEnd}\nNotes: ${notes || 'None'}`
-            : notes,
+        notes,
         reason: notes,
         source: 'Staff Portal'
       }
-    }).catch(err => console.warn('Leave email failed (non-critical):', err));
+    }).catch(err => console.warn('Leave email failed:', err));
 
-    if(qs('#lv-form')) qs('#lv-form').innerHTML = '';
+    if (qs('#lv-form')) qs('#lv-form').innerHTML = '';
 
     const fresh = await getAllData();
-    if(fresh.ok) state.allData = fresh.data || state.allData;
+    if (fresh.ok) state.allData = fresh.data || state.allData;
 
     renderLeave();
     renderHome();
 
     toast(
-      type === 'Sick Leave' && kind === 'partial_day'
-        ? 'Partial sick leave submitted. Please upload your medical certificate. ✓'
+      type === 'Sick Leave'
+        ? 'Sick leave submitted. Please upload your medical certificate once for the applicable sick days. ✓'
         : 'Leave request submitted! Your manager has been notified. ✓',
       'success',
       6000
     );
 
-    if(type === 'Sick Leave' && kind === 'partial_day'){
-      openMC(newReq.id, from);
+    if (type === 'Sick Leave') {
+      const firstSick = createdSickDays[0] || getList('sickDays').find(s => s.empId === state.emp.id && s.date >= from && s.date <= to);
+      if (firstSick) openMC(firstSick.id, firstSick.date);
     }
 
-  } catch(e) {
-    if(btn) {
+  } catch (e) {
+    if (btn) {
       btn.disabled = false;
       btn.textContent = 'Submit request';
     }
@@ -1908,52 +1978,57 @@ window.submitMC = async function() {
     });
 
     const ok = r?.ok || r?.result?.ok;
+    if (!ok) throw new Error(r?.error || r?.result?.error || 'Upload failed');
 
-    if (!ok) {
-      throw new Error(r?.error || r?.result?.error || 'Upload failed');
+    const result = r?.result || r;
+
+    const fileId = result.fileId || result.file_id || result.id || '';
+    const fileUrl = result.fileUrl || result.file_url || result.url || result.webViewLink || '';
+    const downloadUrl = result.downloadUrl || result.download_url || '';
+    const driveFolderId = result.folderId || result.driveFolderId || '1HDf6Wk7UIHl4hvaTByrUINZOqckCS_1q';
+
+    if (!fileId && !fileUrl) {
+      throw new Error('Upload completed, but no Google Drive file ID or URL was returned.');
     }
 
-const result = r?.result || r;
+    const sickDays = getList('sickDays');
+    const currentSick = sickDays.find(s => s.id === _mcS);
+    const relatedSickDays = sickDays.filter(s =>
+      s.empId === state.emp.id &&
+      currentSick &&
+      s.date >= currentSick.date &&
+      !getList('medCerts').some(mc => mc.sickId === s.id || (mc.empId === state.emp.id && mc.date === s.date))
+    );
 
-const fileId =
-  result.fileId ||
-  result.file_id ||
-  result.id ||
-  '';
+    const sickIds = relatedSickDays.length ? relatedSickDays.map(s => s.id) : [_mcS];
 
-const fileUrl =
-  result.fileUrl ||
-  result.file_url ||
-  result.url ||
-  result.webViewLink ||
-  '';
+    sickDays.forEach(s => {
+      if (sickIds.includes(s.id)) {
+        s.mcUploaded = true;
+        s.medCertId = mcId;
+      }
+    });
 
-if (!fileId && !fileUrl) {
-  throw new Error('Upload completed, but no Google Drive file ID or URL was returned.');
-}
+    const mcs = getList('medCerts');
 
-const mcs = getList('medCerts');
+    mcs.push({
+      id: mcId,
+      empId: state.emp.id,
+      date: _mcD,
+      sickId: _mcS,
+      sickDayIds: sickIds,
+      fileName: name,
+      fileType: type,
+      fileId,
+      fileUrl,
+      downloadUrl,
+      driveFolderId,
+      uploadedAt: new Date().toISOString(),
+      managerNotified: true
+    });
 
-mcs.push({
-  id: mcId,
-  empId: state.emp.id,
-  date: _mcD,
-  sickId: _mcS,
-  fileName: name,
-  fileType: type,
-
-  fileId,
-  file_id: fileId,
-  fileUrl,
-  file_url: fileUrl,
-  driveFolderId: '1HDf6Wk7UIHl4hvaTByrUINZOqckCS_1q',
-  drive_folder_id: '1HDf6Wk7UIHl4hvaTByrUINZOqckCS_1q',
-
-  uploadedAt: new Date().toISOString(),
-  managerNotified: true
-});
-
-await saveList('medCerts', mcs);
+    await saveList('sickDays', sickDays);
+    await saveList('medCerts', mcs);
 
     await gasPost({
       action: 'sendEmail',
@@ -1962,12 +2037,12 @@ await saveList('medCerts', mcs);
         empId: state.emp.id,
         empName: `${state.emp.first || ''} ${state.emp.last || ''}`.trim(),
         date: _mcD,
-        fileName: name
+        fileName: name,
+        fileUrl
       }
     }).catch(err => console.warn('MC email failed:', err));
 
     if (qs('#mc-wrap')) qs('#mc-wrap').innerHTML = '';
-
     _mcF = null;
 
     const fresh = await getAllData();
@@ -1976,7 +2051,7 @@ await saveList('medCerts', mcs);
     renderLeave();
     renderHome();
 
-    toast('Certificate uploaded! ✓', 'success');
+    toast('Certificate uploaded and linked to sick leave. ✓', 'success');
 
   } catch (e) {
     console.error('MC upload failed:', e);

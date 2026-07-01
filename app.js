@@ -20,10 +20,35 @@ const state = {
   emp: null,
   allData: {},
   weekOffset: 0,
+  empIds: [],
 };
 
 function normaliseId_(value) {
   return String(value ?? '').trim();
+}
+
+function setEmployeeContext_(emp, legacyId = '') {
+  state.emp = emp || null;
+  const email = String(emp?.email || '').trim().toLowerCase();
+  const ids = new Set([normaliseId_(emp?.id), normaliseId_(legacyId)].filter(Boolean));
+
+  // Retain every staff ID attached to the same email. This prevents historical
+  // shifts disappearing when a staff record has been recreated with a new ID.
+  if (email) {
+    getList('staff').forEach(row => {
+      if (String(row?.email || '').trim().toLowerCase() === email) {
+        const id = normaliseId_(row.id);
+        if (id) ids.add(id);
+      }
+    });
+  }
+
+  state.empIds = [...ids];
+}
+
+function isMyEmpId_(value) {
+  const id = normaliseId_(value);
+  return !!id && (state.empIds || []).some(x => normaliseId_(x) === id);
 }
 function isPublishedShift_(shift) {
   const v = shift?.published;
@@ -550,7 +575,7 @@ function showSetPin(emp, allData) {
     </div>`;
   // pre-load the allData so doSetPin can use it
   state.allData = allData;
-  state.emp = emp;
+  setEmployeeContext_(emp);
   qs('#sp-pin2')?.addEventListener('keydown', e=>{ if(e.key==='Enter') doSetPin(emp.id); });
 }
 
@@ -611,7 +636,7 @@ async function doLogin() {
     if (!pin) { showLogin('Please enter your PIN, or leave it blank if you haven\'t set one yet.'); return; }
     if (String(empByEmail.pin) !== pin) { showLogin('Incorrect PIN — please try again.'); return; }
 
-    state.emp = empByEmail;
+    setEmployeeContext_(empByEmail);
     localStorage.setItem('dukasa_sx', JSON.stringify({id:empByEmail.id, email:empByEmail.email, ts:Date.now(), v:CONFIG.SESSION_VERSION}));
     buildApp();
   } catch(e) { showLogin('Could not connect: '+e.message); }
@@ -712,12 +737,12 @@ function renderHome() {
   console.log('renderHome: emp.id='+emp.id+' emp.first='+emp.first+' emp.email='+emp.email);
   const allShiftRaw = getList('shifts');
   console.log('Total shifts from server: '+allShiftRaw.length);
-  const myRaw = allShiftRaw.filter(s=>normaliseId_(s.empId)===normaliseId_(emp.id));
+  const myRaw = allShiftRaw.filter(s=>isMyEmpId_(s.empId));
   console.log('My shifts (by empId): '+myRaw.length);
   const myPub = myRaw.filter(s=>s.published);
   console.log('My published shifts: '+myPub.length);
   if(myPub.length>0) console.log('Sample: '+JSON.stringify(myPub[0]));
-  const shifts   = getList('shifts').filter(s=>normaliseId_(s.empId)===normaliseId_(emp.id)&&s.published);
+  const shifts   = getList('shifts').filter(s=>isMyEmpId_(s.empId)&&s.published);
   const partialLeaves = shifts.filter(s =>
   s.entryType === 'leave' || s.entry_type === 'leave'
 );
@@ -725,9 +750,9 @@ function renderHome() {
 const normalShifts = shifts.filter(s =>
   !(s.entryType === 'leave' || s.entry_type === 'leave')
 );
-  const sick     = getList('sickDays').filter(s=>normaliseId_(s.empId)===normaliseId_(emp.id));
-  const leaves   = getList('leaveRequests').filter(l=>l.empId===emp.id);
-  const medCerts = getList('medCerts').filter(m=>normaliseId_(m.empId)===normaliseId_(emp.id));
+  const sick     = getList('sickDays').filter(s=>isMyEmpId_(s.empId));
+  const leaves   = getList('leaveRequests').filter(l=>isMyEmpId_(l.empId));
+  const medCerts = getList('medCerts').filter(m=>isMyEmpId_(m.empId));
 
 const outstandingMC = sick.find(s =>
   !medCerts.some(mc =>
@@ -746,7 +771,7 @@ const outstandingMC = sick.find(s =>
   // ── BREAK TRACKING ─────────────────────────────────────────────
   // Sort all clock events by ts (falling back to time string) so ordering is reliable
   const ce = getList('clockEvents')
-    .filter(e=>normaliseId_(e.empId)===normaliseId_(emp.id)&&e.date===td)
+    .filter(e=>isMyEmpId_(e.empId)&&e.date===td)
     .sort((a,b)=>(a.ts||a.time||'').localeCompare(b.ts||b.time||''));
 
   // Pair up break-start / break-end events chronologically
@@ -1145,9 +1170,9 @@ function renderRoster() {
   const we       = addDays(ws,6);
   const td       = today();
 
-  const myShifts = getList('shifts').filter(s=>normaliseId_(s.empId)===normaliseId_(emp.id)&&s.published);
-  const mySick   = getList('sickDays').filter(s=>normaliseId_(s.empId)===normaliseId_(emp.id));
-  const myLeaves = getList('leaveRequests').filter(l=>l.empId===emp.id&&l.status==='approved');
+  const myShifts = getList('shifts').filter(s=>isMyEmpId_(s.empId)&&s.published);
+  const mySick   = getList('sickDays').filter(s=>isMyEmpId_(s.empId));
+  const myLeaves = getList('leaveRequests').filter(l=>isMyEmpId_(l.empId)&&l.status==='approved');
   const wkTot    = myShifts.filter(s=>s.date>=ws&&s.date<=we).reduce((t,s)=>t+shiftHrs(s),0);
 
   const days = Array.from({length:7},(_,i)=>{
@@ -1397,7 +1422,7 @@ window.submitLate = async function() {
   const errEl=qs('#late-err');
   if (!reason||!eta){ if(errEl) errEl.style.display='block'; return; }
   if (errEl) errEl.style.display='none';
-  const td=today(), shift=getList('shifts').find(s=>normaliseId_(s.empId)===normaliseId_(state.emp.id)&&s.date===td&&s.published);
+  const td=today(), shift=getList('shifts').find(s=>isMyEmpId_(s.empId)&&s.date===td&&s.published);
   if (!shift) return;
   // Show sending state
   const sendBtn = qs('#late-modal .btn-primary');
@@ -1416,9 +1441,9 @@ window.submitLate = async function() {
 // ── LEAVE ──────────────────────────────────────────────────────
 function renderLeave() {
   const emp    = state.emp;
-  const reqs   = getList('leaveRequests').filter(l=>l.empId===emp.id).sort((a,b)=>(b.submitted||b.from||'').localeCompare(a.submitted||a.from||''));
-  const sick   = getList('sickDays').filter(s=>normaliseId_(s.empId)===normaliseId_(emp.id)).sort((a,b)=>(b.date||"").localeCompare(a.date||""));
-  const mcs    = getList('medCerts').filter(m=>normaliseId_(m.empId)===normaliseId_(emp.id));
+  const reqs   = getList('leaveRequests').filter(l=>isMyEmpId_(l.empId)).sort((a,b)=>(b.submitted||b.from||'').localeCompare(a.submitted||a.from||''));
+  const sick   = getList('sickDays').filter(s=>isMyEmpId_(s.empId)).sort((a,b)=>(b.date||"").localeCompare(a.date||""));
+  const mcs    = getList('medCerts').filter(m=>isMyEmpId_(m.empId));
   const pending= reqs.filter(l=>l.status==='pending');
   const hist   = reqs.filter(l=>l.status!=='pending');
   const partialLeaves = getList('shifts')
@@ -2468,7 +2493,7 @@ gasPost({
 // ── HOURS ──────────────────────────────────────────────────────
 function renderHours() {
   const emp    = state.emp;
-  const shifts = getList('shifts').filter(s=>normaliseId_(s.empId)===normaliseId_(emp.id)&&s.published);
+  const shifts = getList('shifts').filter(s=>isMyEmpId_(s.empId)&&s.published);
   const td     = today();
   const ws     = weekStart(0), we=addDays(ws,6);
   const now    = new Date();
@@ -2790,7 +2815,7 @@ function startClockEventsRealtime() {
               ? getList('staff').find(s => (s.email || '').toLowerCase() === email)
               : null;
 
-            if (freshEmp) state.emp = freshEmp;
+            if (freshEmp) setEmployeeContext_(freshEmp, state.emp?.id);
 
             if (state.currentView === 'home') renderHome();
             if (state.currentView === 'roster') renderRoster();
@@ -2882,7 +2907,7 @@ async function init() {
       const email = (sx.email||'').toLowerCase();
       const emp = email ? getList('staff').find(s=>(s.email||'').toLowerCase()===email) : null;
       if (emp) {
-        state.emp = emp;
+        setEmployeeContext_(emp, sx.id);
         // Always update session with current id and email
         localStorage.setItem('dukasa_sx', JSON.stringify({
           id: emp.id, email: emp.email, ts: Date.now(), v: CONFIG.SESSION_VERSION

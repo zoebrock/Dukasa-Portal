@@ -12,7 +12,7 @@ const supabase = createClient(
 
 const CONFIG = {
   GAS_URL: '/api/gas',
-  SESSION_VERSION: 3
+  SESSION_VERSION: 4
 };
 
 const state = {
@@ -55,6 +55,43 @@ function isPublishedShift_(shift) {
   return v === true || v === 1 || String(v).trim().toLowerCase() === 'true' || String(shift?.status || '').trim().toLowerCase() === 'published';
 }
 
+async function fetchAllRows_(table, configureQuery = null) {
+  const pageSize = 1000;
+  const allRows = [];
+  let from = 0;
+
+  while (true) {
+    let query = supabase
+      .from(table)
+      .select('*')
+      .range(from, from + pageSize - 1);
+
+    if (typeof configureQuery === 'function') {
+      query = configureQuery(query);
+    }
+
+    const { data, error } = await query;
+
+    if (error) {
+      throw new Error(`${table}: ${error.message}`);
+    }
+
+    const rows = data || [];
+    allRows.push(...rows);
+
+    if (rows.length < pageSize) {
+      break;
+    }
+
+    from += pageSize;
+  }
+
+  return {
+    data: allRows,
+    error: null
+  };
+}
+
 async function getAllData() {
   const [
     staff,
@@ -66,99 +103,136 @@ async function getAllData() {
     medCerts,
     announcements
   ] = await Promise.all([
-    supabase.from('staff').select('*'),
-    supabase.from('shifts').select('*').order('date', { ascending: true }).order('start', { ascending: true }),
+    fetchAllRows_('staff', query =>
+      query.order('id', { ascending: true })
+    ),
+
+    fetchAllRows_('shifts', query =>
+      query
+        .order('date', { ascending: true })
+        .order('start', { ascending: true })
+        .order('id', { ascending: true })
+    ),
+
     supabase
-  .from('clock_events')
-  .select('*')
-  .gte('date', addDays(today(), -14))
-  .lte('date', addDays(today(), 1))
-  .order('date', { ascending: false })
-  .order('time', { ascending: false })
-  .limit(2000),
-    supabase.from('leave_requests').select('*'),
-    supabase.from('ot_requests').select('*'),
-    supabase.from('sick_days').select('*'),
-    supabase.from('med_certs').select('*'),
-    supabase.from('announcements').select('*')
+      .from('clock_events')
+      .select('*')
+      .gte('date', addDays(today(), -14))
+      .lte('date', addDays(today(), 1))
+      .order('date', { ascending: false })
+      .order('time', { ascending: false })
+      .limit(2000),
+
+    fetchAllRows_('leave_requests', query =>
+      query.order('id', { ascending: true })
+    ),
+
+    fetchAllRows_('ot_requests', query =>
+      query.order('id', { ascending: true })
+    ),
+
+    fetchAllRows_('sick_days', query =>
+      query.order('id', { ascending: true })
+    ),
+
+    fetchAllRows_('med_certs', query =>
+      query.order('id', { ascending: true })
+    ),
+
+    fetchAllRows_('announcements', query =>
+      query.order('id', { ascending: true })
+    )
   ]);
 
-  // Staff and shifts are the two critical datasets required to build the portal.
-  // Optional-table failures must not block roster refreshes.
-  if (staff.error) throw new Error('staff: ' + staff.error.message);
-  if (shifts.error) throw new Error('shifts: ' + shifts.error.message);
+  if (staff.error) {
+    throw new Error('staff: ' + staff.error.message);
+  }
 
-  const optionalResults = { clockEvents, leaveRequests, otRequests, sickDays, medCerts, announcements };
+  if (shifts.error) {
+    throw new Error('shifts: ' + shifts.error.message);
+  }
+
+  const optionalResults = {
+    clockEvents,
+    leaveRequests,
+    otRequests,
+    sickDays,
+    medCerts,
+    announcements
+  };
+
   Object.entries(optionalResults).forEach(([name, result]) => {
-    if (result?.error) console.warn(name + ' load skipped:', result.error.message);
+    if (result?.error) {
+      console.warn(name + ' load skipped:', result.error.message);
+    }
   });
 
-const mappedShifts = (shifts.data || []).map(s => ({
-  ...s,
-  id: normaliseId_(s.id),
-  empId: normaliseId_(s.emp_id ?? s.empId),
-  date: cleanDate_(s.date),
-  start: cleanTime_(s.start),
-  end: cleanTime_(s.end),
-  published: isPublishedShift_(s),
-  breakMin: s.break_min,
-  paidBreakMin: s.paid_break_min,
-  isOT: s.is_ot,
-  otId: s.ot_id,
-  otOriginalStart: s.ot_original_start,
-  otOriginalEnd: s.ot_original_end,
-  otAnnotations: s.ot_annotations || [],
-  entryType: s.entry_type,
-  leaveType: s.leave_type,
-  leaveReason: s.leave_reason
-}));
+  const mappedShifts = (shifts.data || []).map(s => ({
+    ...s,
+    id: normaliseId_(s.id),
+    empId: normaliseId_(s.emp_id ?? s.empId),
+    date: cleanDate_(s.date),
+    start: cleanTime_(s.start),
+    end: cleanTime_(s.end),
+    published: isPublishedShift_(s),
+    breakMin: s.break_min,
+    paidBreakMin: s.paid_break_min,
+    isOT: s.is_ot,
+    otId: s.ot_id,
+    otOriginalStart: s.ot_original_start,
+    otOriginalEnd: s.ot_original_end,
+    otAnnotations: s.ot_annotations || [],
+    entryType: s.entry_type,
+    leaveType: s.leave_type,
+    leaveReason: s.leave_reason
+  }));
 
-const mappedClockEvents = (clockEvents.data || []).map(e => ({
-  ...e,
-  empId: e.emp_id || e.empId,
-  shiftId: e.shift_id || e.shiftId,
-  photoUrl: e.photo_url || e.photoUrl,
-  ts: e.ts || e.timestamp || e.created_at || null,
-  date: cleanDate_(e.date),
-  time: cleanTime_(e.time),
-  type: String(e.type || '').trim()
-}));
+  const mappedClockEvents = (clockEvents.data || []).map(e => ({
+    ...e,
+    empId: normaliseId_(e.emp_id ?? e.empId),
+    shiftId: normaliseId_(e.shift_id ?? e.shiftId),
+    photoUrl: e.photo_url || e.photoUrl,
+    ts: e.ts || e.timestamp || e.created_at || null,
+    date: cleanDate_(e.date),
+    time: cleanTime_(e.time),
+    type: String(e.type || '').trim()
+  }));
 
-const mappedLeaveRequests = (leaveRequests.data || []).map(l => ({
-  ...l,
-  empId: l.emp_id,
-  changeRequested: l.change_requested,
-  previousFrom: l.previous_from,
-  previousTo: l.previous_to,
-  previousType: l.previous_type,
-  previousStatus: l.previous_status,
-  editedAt: l.edited_at,
-  lastEditedBy: l.last_edited_by,
-  requestKind: l.request_kind,
-  partialStart: l.partial_start,
-  partialEnd: l.partial_end,
-  medicalCertificateRequired: l.medical_certificate_required
-}));
+  const mappedLeaveRequests = (leaveRequests.data || []).map(l => ({
+    ...l,
+    empId: normaliseId_(l.emp_id ?? l.empId),
+    changeRequested: l.change_requested,
+    previousFrom: l.previous_from,
+    previousTo: l.previous_to,
+    previousType: l.previous_type,
+    previousStatus: l.previous_status,
+    editedAt: l.edited_at,
+    lastEditedBy: l.last_edited_by,
+    requestKind: l.request_kind,
+    partialStart: l.partial_start,
+    partialEnd: l.partial_end,
+    medicalCertificateRequired: l.medical_certificate_required
+  }));
 
-const mappedOTRequests = (otRequests.data || []).map(o => ({
-  ...o,
-  empId: o.emp_id,
-  requestedBy: o.requested_by,
-  staffRead: o.staff_read,
-  availConfirmed: o.avail_confirmed,
-  staffConfirmed: o.staff_confirmed,
-  staffDenialReason: o.staff_denial_reason,
-  task: o.task || ''
-}));
+  const mappedOTRequests = (otRequests.data || []).map(o => ({
+    ...o,
+    empId: normaliseId_(o.emp_id ?? o.empId),
+    requestedBy: o.requested_by,
+    staffRead: o.staff_read,
+    availConfirmed: o.avail_confirmed,
+    staffConfirmed: o.staff_confirmed,
+    staffDenialReason: o.staff_denial_reason,
+    task: o.task || ''
+  }));
 
   const mappedSickDays = (sickDays.data || []).map(s => ({
     ...s,
-    empId: s.emp_id
+    empId: normaliseId_(s.emp_id ?? s.empId)
   }));
 
   const mappedMedCerts = (medCerts.data || []).map(m => ({
     ...m,
-    empId: m.emp_id,
+    empId: normaliseId_(m.emp_id ?? m.empId),
     sickId: m.sick_id,
     fileName: m.file_name,
     fileType: m.file_type,
@@ -172,13 +246,26 @@ const mappedOTRequests = (otRequests.data || []).map(o => ({
     notifyStaff: a.notifyStaff || a.notify_staff || false
   }));
 
+  console.log('Staff Portal data loaded:', {
+    staff: staff.data?.length || 0,
+    shifts: mappedShifts.length,
+    futureShifts: mappedShifts.filter(
+      shift => shift.date >= today()
+    ).length,
+    publishedFutureShifts: mappedShifts.filter(
+      shift => shift.date >= today() && shift.published
+    ).length
+  });
+
   return {
     ok: true,
     data: {
-      rx3_staff: JSON.stringify((staff.data || []).map(row => ({
-        ...row,
-        id: normaliseId_(row.id)
-      }))),
+      rx3_staff: JSON.stringify(
+        (staff.data || []).map(row => ({
+          ...row,
+          id: normaliseId_(row.id)
+        }))
+      ),
       rx3_shifts: JSON.stringify(mappedShifts),
       rx3_clockEvents: JSON.stringify(mappedClockEvents),
       rx3_leaveRequests: JSON.stringify(mappedLeaveRequests),
@@ -2836,18 +2923,23 @@ function startShiftsRealtime() {
     .channel('staff-shifts-live')
     .on(
       'postgres_changes',
-      { event: '*', schema: 'public', table: 'shifts' },
+      {
+        event: '*',
+        schema: 'public',
+        table: 'shifts'
+      },
       async () => {
         try {
-          const { data, error } = await supabase
-            .from('shifts')
-            .select('*')
-            .order('date', { ascending: true })
-            .order('start', { ascending: true });
+          const result = await fetchAllRows_(
+            'shifts',
+            query =>
+              query
+                .order('date', { ascending: true })
+                .order('start', { ascending: true })
+                .order('id', { ascending: true })
+          );
 
-          if (error) throw error;
-
-          const mappedShifts = (data || []).map(s => ({
+          const mappedShifts = (result.data || []).map(s => ({
             ...s,
             id: normaliseId_(s.id),
             empId: normaliseId_(s.emp_id ?? s.empId),
@@ -2867,17 +2959,37 @@ function startShiftsRealtime() {
             leaveReason: s.leave_reason
           }));
 
-          state.allData.rx3_shifts = JSON.stringify(mappedShifts);
+          state.allData.rx3_shifts =
+            JSON.stringify(mappedShifts);
 
-          if (state.currentView === 'home') renderHome();
-          if (state.currentView === 'roster') renderRoster();
-          if (state.currentView === 'hours') renderHours();
-        } catch (e) {
-          console.warn('Realtime shift refresh failed:', e.message);
+          console.log(
+            'Realtime shift refresh:',
+            mappedShifts.length,
+            'total shifts'
+          );
+
+          if (state.currentView === 'home') {
+            renderHome();
+          }
+
+          if (state.currentView === 'roster') {
+            renderRoster();
+          }
+
+          if (state.currentView === 'hours') {
+            renderHours();
+          }
+        } catch (error) {
+          console.warn(
+            'Realtime shift refresh failed:',
+            error.message
+          );
         }
       }
     )
-    .subscribe();
+    .subscribe(status => {
+      console.log('Staff realtime shifts:', status);
+    });
 }
 
 // ── LOADING ────────────────────────────────────────────────────

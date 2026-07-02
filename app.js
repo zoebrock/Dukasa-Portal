@@ -1505,22 +1505,82 @@ window.openLate = function() {
   setTimeout(() => qs('#late-r')?.focus(), 300);
 };
 
+async function saveRunningLateReport_(payload) {
+  const row = {
+    id: payload.id,
+    emp_id: payload.empId,
+    staff_name: payload.staffName,
+    staff_email: payload.staffEmail || null,
+    shift_id: payload.shiftId || null,
+    date: payload.date,
+    shift_start: payload.shiftStart || null,
+    shift_end: payload.shiftEnd || null,
+    eta: payload.eta,
+    reason: payload.reason,
+    manager_contacted: !!payload.managerContacted,
+    acknowledged: false,
+    acknowledged_at: null,
+    created_at: payload.createdAt
+  };
+
+  const { error } = await supabase
+    .from('late_reports')
+    .upsert(row, { onConflict: 'id' });
+
+  if (error) throw new Error('Could not save running-late report: ' + error.message);
+}
+
 window.submitLate = async function() {
   const reason=qs('#late-r')?.value.trim(), eta=qs('#late-eta')?.value.trim(), contacted=qs('#late-c')?.checked||false;
   const errEl=qs('#late-err');
   if (!reason||!eta){ if(errEl) errEl.style.display='block'; return; }
   if (errEl) errEl.style.display='none';
-  const td=today(), shift=getList('shifts').find(s=>isMyEmpId_(s.empId)&&s.date===td&&s.published);
-  if (!shift) return;
-  // Show sending state
+
+  const td=today();
+  const shift=getList('shifts').find(s=>isMyEmpId_(s.empId)&&s.date===td&&s.published);
+  if (!shift) {
+    toast('Your rostered shift could not be found. Please refresh and try again.','error');
+    return;
+  }
+
+  const staffName = `${state.emp?.first || ''} ${state.emp?.last || ''}`.trim() || 'Staff member';
+  const createdAt = new Date().toISOString();
+  const reportId = ['late', normaliseId_(shift.empId || state.emp?.id), td, eta, Date.now()].join('-');
+  const payload = {
+    id: reportId,
+    reportId,
+    empId: normaliseId_(shift.empId || state.emp?.id),
+    employeeId: normaliseId_(shift.empId || state.emp?.id),
+    empFirst: state.emp?.first || '',
+    empLast: state.emp?.last || '',
+    empName: staffName,
+    staffName,
+    staffMember: staffName,
+    empEmail: state.emp?.email || '',
+    staffEmail: state.emp?.email || '',
+    shiftId: normaliseId_(shift.id),
+    date: td,
+    shiftStart: shift.start,
+    shiftEnd: shift.end,
+    reason,
+    eta,
+    contacted,
+    managerContacted: contacted,
+    createdAt
+  };
+
   const sendBtn = qs('#late-modal .btn-primary');
   if (sendBtn) { sendBtn.textContent='Sending…'; sendBtn.disabled=true; }
+
   try {
-    await gasPost({action:'sendEmail',fn:'sendRunningLateNotification',
-      payload:{empId:state.emp.id,date:td,shiftStart:shift.start,shiftEnd:shift.end,reason,eta,contacted}});
+    // Save first so the manager portal and timesheet receive a durable record,
+    // even if the email service is temporarily delayed.
+    await saveRunningLateReport_(payload);
+    await gasPost({action:'sendEmail',fn:'sendRunningLateNotification',payload});
     qs('#late-modal')?.remove();
-    toast('Your manager has been notified. ✓','success');
+    toast('Your manager has been notified and your timesheet has been noted. ✓','success');
   } catch(e){
+    console.error('Running-late submission failed:', e);
     if(sendBtn){ sendBtn.textContent='Notify manager'; sendBtn.disabled=false; }
     toast('Could not send — please contact your manager directly.','error');
   }

@@ -1535,6 +1535,8 @@ function isAnnualLeave_(leave) {
 function approvedAnnualLeave_() {
   const staffById = new Map(getList('staff').map(person => [normaliseId_(person.id), person]));
 
+  const seen = new Set();
+
   return getList('leaveRequests')
     .filter(leave => String(leave.status || '').toLowerCase() === 'approved' && isAnnualLeave_(leave))
     .map(leave => ({
@@ -1545,6 +1547,12 @@ function approvedAnnualLeave_() {
       person: staffById.get(normaliseId_(leave.empId ?? leave.emp_id)) || null
     }))
     .filter(leave => leave.from && leave.to && leave.person)
+    .filter(leave => {
+      const key = `${leave.empId}|${leave.from}|${leave.to}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
     .sort((a, b) => a.from.localeCompare(b.from) || String(a.person.first || '').localeCompare(String(b.person.first || '')));
 }
 
@@ -1560,6 +1568,7 @@ function leaveCalendarHTML_() {
   const calendarStart = new Date(year, month - 1, 1 - ((first.getDay() + 6) % 7));
   const monthLabel = first.toLocaleDateString('en-AU', { month: 'long', year: 'numeric' });
   const td = today();
+  const todayAway = approved.filter(leave => leave.from <= td && leave.to >= td);
   const upcomingEnd = addDays(td, 90);
   const upcoming = approved.filter(leave => leave.to >= td && leave.from <= upcomingEnd).slice(0, 12);
   const weekdays = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
@@ -1587,12 +1596,21 @@ function leaveCalendarHTML_() {
           }).join('')}
           ${dayLeave.length > 2 ? `<div class="team-leave-more">+${dayLeave.length - 2} more</div>` : ''}
         </div>
+        <div class="team-leave-mobile-dots">
+          ${dayLeave.slice(0, 4).map(leave => `<span class="team-leave-mobile-dot" style="--leave-colour:${staffLeaveColour_(leave.person)}"></span>`).join('')}
+          ${dayLeave.length > 4 ? `<span class="team-leave-more">+${dayLeave.length - 4}</span>` : ''}
+        </div>
       </button>`);
   }
 
   return `
     <style id="team-leave-calendar-styles">
       .team-leave-card{overflow:hidden;margin-bottom:18px}
+      .team-leave-today{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 14px;margin-bottom:14px;border-radius:14px;background:#f4f2ff;border:1px solid rgba(83,74,183,.16);cursor:pointer}
+      .team-leave-today-main{min-width:0}
+      .team-leave-today-label{font-size:.68rem;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:#534AB7;margin-bottom:3px}
+      .team-leave-today-names{font-size:.84rem;font-weight:750;color:#181816;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+      .team-leave-today-count{display:flex;align-items:center;justify-content:center;min-width:32px;height:32px;padding:0 9px;border-radius:999px;background:#534AB7;color:#fff;font-size:.78rem;font-weight:800;flex-shrink:0}
       .team-leave-head{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;margin-bottom:14px}
       .team-leave-title{font-weight:750;font-size:1rem;color:#181816}
       .team-leave-copy{font-size:.78rem;color:#707067;line-height:1.45;margin-top:3px}
@@ -1612,6 +1630,8 @@ function leaveCalendarHTML_() {
       .team-leave-events{display:flex;flex-direction:column;gap:3px;pointer-events:none}
       .team-leave-pill{background:color-mix(in srgb,var(--leave-colour) 14%,white);color:var(--leave-colour);border:1px solid color-mix(in srgb,var(--leave-colour) 38%,white);border-left:3px solid var(--leave-colour);border-radius:5px;padding:3px 5px;font-size:.63rem;font-weight:750;line-height:1.15;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
       .team-leave-more{font-size:.61rem;color:#707067;padding-left:3px;font-weight:650}
+      .team-leave-mobile-dots{display:none;align-items:center;gap:2px;flex-wrap:wrap;pointer-events:none}
+      .team-leave-mobile-dot{width:5px;height:5px;border-radius:50%;background:var(--leave-colour)}
       .team-leave-upcoming{display:none}
       .team-leave-upcoming-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 0;border-bottom:1px solid rgba(24,24,22,.08);cursor:pointer;border-radius:8px}
       .team-leave-upcoming-row:last-child{border-bottom:0}
@@ -1638,16 +1658,29 @@ function leaveCalendarHTML_() {
       @keyframes leaveModalIn{from{opacity:0;transform:translateY(10px) scale(.98)}to{opacity:1;transform:none}}
       @media(max-width:680px){
         .team-leave-head{align-items:center}.team-leave-copy{max-width:240px}
-        .team-leave-calendar-desktop{display:none}.team-leave-upcoming{display:block}
-        .team-leave-month{min-width:112px}.team-leave-day{min-height:62px;padding:4px}
+        .team-leave-calendar-desktop{display:block}.team-leave-upcoming{display:none}
+        .team-leave-month{min-width:112px}
+        .team-leave-weekday{font-size:.55rem;padding:6px 1px;letter-spacing:.02em}
+        .team-leave-day{min-height:48px;padding:4px 3px;text-align:center}
+        .team-leave-date{font-size:.66rem;margin-bottom:4px}
+        .team-leave-events{display:none}
+        .team-leave-mobile-dots{display:flex;justify-content:center}
+        .team-leave-day.is-today{box-shadow:inset 0 0 0 2px #534AB7;background:#f4f2ff}
       }
       @media(max-width:420px){.team-leave-head{align-items:flex-start;flex-direction:column}.team-leave-nav{width:100%;justify-content:space-between}.leave-day-modal{border-radius:18px;padding:18px}}
     </style>
     <div class="card team-leave-card">
+      <div class="team-leave-today" role="button" tabindex="0" onclick="openLeaveDayPopup('${td}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openLeaveDayPopup('${td}')}">
+        <div class="team-leave-today-main">
+          <div class="team-leave-today-label">Away today</div>
+          <div class="team-leave-today-names">${todayAway.length ? esc(todayAway.map(leave => leave.person.first || `${leave.person.first || ''} ${leave.person.last || ''}`.trim()).join(', ')) : 'No one is on approved annual leave today'}</div>
+        </div>
+        <div class="team-leave-today-count">${todayAway.length}</div>
+      </div>
       <div class="team-leave-head">
         <div>
           <div class="team-leave-title">Who’s away</div>
-          <div class="team-leave-copy">Approved annual leave only. Select any date to see everyone away. Leave reasons remain private.</div>
+          <div class="team-leave-copy">Approved annual leave only. Tap any date to see everyone away. Leave reasons remain private.</div>
         </div>
         <div class="team-leave-nav">
           <button class="btn btn-secondary btn-sm" onclick="changeLeaveCalendarMonth(-1)" aria-label="Previous month">‹</button>

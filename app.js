@@ -20,6 +20,7 @@ const state = {
   emp: null,
   allData: {},
   weekOffset: 0,
+  leaveCalendarMonth: null,
   empIds: [],
 };
 
@@ -1526,6 +1527,122 @@ window.submitLate = async function() {
 };
 
 // ── LEAVE ──────────────────────────────────────────────────────
+function isAnnualLeave_(leave) {
+  return String(leave?.type || leave?.leaveType || leave?.leave_type || '')
+    .trim().toLowerCase() === 'annual leave';
+}
+
+function approvedAnnualLeave_() {
+  const staffById = new Map(getList('staff').map(person => [normaliseId_(person.id), person]));
+
+  return getList('leaveRequests')
+    .filter(leave => String(leave.status || '').toLowerCase() === 'approved' && isAnnualLeave_(leave))
+    .map(leave => ({
+      ...leave,
+      empId: normaliseId_(leave.empId ?? leave.emp_id),
+      from: cleanDate_(leave.from),
+      to: cleanDate_(leave.to),
+      person: staffById.get(normaliseId_(leave.empId ?? leave.emp_id)) || null
+    }))
+    .filter(leave => leave.from && leave.to && leave.person)
+    .sort((a, b) => a.from.localeCompare(b.from) || String(a.person.first || '').localeCompare(String(b.person.first || '')));
+}
+
+function leaveCalendarHTML_() {
+  const approved = approvedAnnualLeave_();
+  const [year, month] = String(state.leaveCalendarMonth || today().slice(0, 7)).split('-').map(Number);
+  const first = new Date(year, month - 1, 1);
+  const calendarStart = new Date(year, month - 1, 1 - ((first.getDay() + 6) % 7));
+  const monthLabel = first.toLocaleDateString('en-AU', { month: 'long', year: 'numeric' });
+  const td = today();
+  const upcomingEnd = addDays(td, 90);
+  const upcoming = approved.filter(leave => leave.to >= td && leave.from <= upcomingEnd).slice(0, 8);
+  const weekdays = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+  const cells = [];
+
+  for (let i = 0; i < 42; i++) {
+    const date = new Date(calendarStart);
+    date.setDate(calendarStart.getDate() + i);
+    const ds = localISO(date);
+    const inMonth = date.getMonth() === month - 1;
+    const dayLeave = approved.filter(leave => leave.from <= ds && leave.to >= ds);
+    const visible = dayLeave.slice(0, 2);
+
+    cells.push(`
+      <div class="team-leave-day ${inMonth ? '' : 'is-outside'} ${ds === td ? 'is-today' : ''}" aria-label="${esc(FD(ds))}">
+        <div class="team-leave-date">${date.getDate()}</div>
+        <div class="team-leave-events">
+          ${visible.map(leave => `<div class="team-leave-pill" title="${esc(`${leave.person.first} ${leave.person.last || ''}`.trim())}">${esc(leave.person.first)}${leave.person.last ? ` ${esc(String(leave.person.last).charAt(0))}.` : ''}</div>`).join('')}
+          ${dayLeave.length > 2 ? `<div class="team-leave-more">+${dayLeave.length - 2} more</div>` : ''}
+        </div>
+      </div>`);
+  }
+
+  return `
+    <style id="team-leave-calendar-styles">
+      .team-leave-card{overflow:hidden;margin-bottom:18px}
+      .team-leave-head{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;margin-bottom:14px}
+      .team-leave-title{font-weight:750;font-size:1rem;color:#181816}
+      .team-leave-copy{font-size:.78rem;color:#707067;line-height:1.45;margin-top:3px}
+      .team-leave-nav{display:flex;align-items:center;gap:8px;flex-shrink:0}
+      .team-leave-month{min-width:132px;text-align:center;font-weight:700;font-size:.82rem}
+      .team-leave-weekdays,.team-leave-grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr))}
+      .team-leave-weekdays{border:1px solid rgba(24,24,22,.09);border-bottom:0;border-radius:14px 14px 0 0;overflow:hidden;background:#f5f5f0}
+      .team-leave-weekday{text-align:center;padding:7px 2px;font-size:.64rem;font-weight:700;letter-spacing:.05em;color:#77776e;text-transform:uppercase}
+      .team-leave-grid{border-left:1px solid rgba(24,24,22,.09);border-top:1px solid rgba(24,24,22,.09)}
+      .team-leave-day{min-height:84px;padding:6px;border-right:1px solid rgba(24,24,22,.09);border-bottom:1px solid rgba(24,24,22,.09);background:#fff;min-width:0}
+      .team-leave-day:nth-last-child(-n+7):first-child{border-radius:0 0 0 14px}
+      .team-leave-day.is-outside{background:#fafaf7;color:#aaa}
+      .team-leave-day.is-today{box-shadow:inset 0 0 0 2px #534AB7}
+      .team-leave-date{font-size:.7rem;font-weight:700;margin-bottom:5px}
+      .team-leave-events{display:flex;flex-direction:column;gap:3px}
+      .team-leave-pill{background:#EEEDFE;color:#3C3489;border-radius:5px;padding:3px 5px;font-size:.63rem;font-weight:700;line-height:1.15;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+      .team-leave-more{font-size:.61rem;color:#707067;padding-left:3px}
+      .team-leave-upcoming{display:none}
+      .team-leave-upcoming-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 0;border-bottom:1px solid rgba(24,24,22,.08)}
+      .team-leave-upcoming-row:last-child{border-bottom:0}
+      .team-leave-name{font-size:.83rem;font-weight:700}
+      .team-leave-dates{font-size:.74rem;color:#707067;white-space:nowrap}
+      @media(max-width:680px){
+        .team-leave-head{align-items:center}.team-leave-copy{max-width:210px}
+        .team-leave-calendar-desktop{display:none}.team-leave-upcoming{display:block}
+        .team-leave-month{min-width:112px}.team-leave-day{min-height:62px;padding:4px}
+      }
+      @media(max-width:420px){.team-leave-head{align-items:flex-start;flex-direction:column}.team-leave-nav{width:100%;justify-content:space-between}}
+    </style>
+    <div class="card team-leave-card">
+      <div class="team-leave-head">
+        <div>
+          <div class="team-leave-title">Who’s away</div>
+          <div class="team-leave-copy">Approved annual leave only. Leave reasons and personal details remain private.</div>
+        </div>
+        <div class="team-leave-nav">
+          <button class="btn btn-secondary btn-sm" onclick="changeLeaveCalendarMonth(-1)" aria-label="Previous month">‹</button>
+          <div class="team-leave-month">${esc(monthLabel)}</div>
+          <button class="btn btn-secondary btn-sm" onclick="changeLeaveCalendarMonth(1)" aria-label="Next month">›</button>
+        </div>
+      </div>
+      <div class="team-leave-calendar-desktop">
+        <div class="team-leave-weekdays">${weekdays.map(day => `<div class="team-leave-weekday">${day}</div>`).join('')}</div>
+        <div class="team-leave-grid">${cells.join('')}</div>
+      </div>
+      <div class="team-leave-upcoming">
+        ${upcoming.length ? upcoming.map(leave => `
+          <div class="team-leave-upcoming-row">
+            <div class="team-leave-name">${esc(`${leave.person.first} ${leave.person.last || ''}`.trim())}</div>
+            <div class="team-leave-dates">${esc(FDS(leave.from))}${leave.to !== leave.from ? ` – ${esc(FDS(leave.to))}` : ''}</div>
+          </div>`).join('') : '<div class="helper-note">No approved annual leave in the next 90 days.</div>'}
+      </div>
+    </div>`;
+}
+
+window.changeLeaveCalendarMonth = function(delta) {
+  const [year, month] = String(state.leaveCalendarMonth || today().slice(0, 7)).split('-').map(Number);
+  const next = new Date(year, month - 1 + Number(delta || 0), 1);
+  state.leaveCalendarMonth = localISO(next).slice(0, 7);
+  renderLeave();
+};
+
 function renderLeave() {
   const emp    = state.emp;
   const reqs   = getList('leaveRequests').filter(l=>isMyEmpId_(l.empId)).sort((a,b)=>(b.submitted||b.from||'').localeCompare(a.submitted||a.from||''));
@@ -1553,6 +1670,7 @@ function renderLeave() {
       <button class="btn btn-primary" onclick="openLeaveForm()">+ Request leave</button>
     </div>
     <div id="lv-form"></div>
+    ${leaveCalendarHTML_()}
     ${partialLeaves.length ? `
   <div class="section-label">Approved partial leave</div>
   <div class="info-grid">

@@ -2824,6 +2824,149 @@ gasPost({
     toast('Could not submit OT: ' + e.message, 'error', 5000);
   }
 };
+
+function normaliseAvailabilityEntry_(value) {
+  if (value === false || value === null) {
+    return { mode: 'unavailable', start: '', end: '' };
+  }
+
+  if (value === true || value === undefined) {
+    return { mode: 'full', start: '', end: '' };
+  }
+
+  if (typeof value === 'string') {
+    const mode = value.toLowerCase();
+    return {
+      mode: mode === 'times' ? 'times' : mode === 'unavailable' ? 'unavailable' : 'full',
+      start: '',
+      end: ''
+    };
+  }
+
+  const mode = String(value.mode || value.type || (value.available === false ? 'unavailable' : 'full')).toLowerCase();
+  return {
+    mode: mode === 'times' ? 'times' : mode === 'unavailable' ? 'unavailable' : 'full',
+    start: cleanTime_(value.start || value.from || ''),
+    end: cleanTime_(value.end || value.to || '')
+  };
+}
+
+function availabilityForDay_(emp, day) {
+  return normaliseAvailabilityEntry_(emp?.availability?.[day]);
+}
+
+function availabilityLabel_(entry) {
+  const value = normaliseAvailabilityEntry_(entry);
+  if (value.mode === 'unavailable') return 'Unavailable';
+  if (value.mode === 'times') return `${value.start || '—'} – ${value.end || '—'}`;
+  return 'Available all day';
+}
+
+function availabilityEditorHTML_(emp) {
+  const days = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+  return `
+    <div class="card" style="margin-bottom:18px">
+      <div style="font-weight:700;font-size:1rem;margin-bottom:4px">Your regular availability</div>
+      <div style="font-size:.82rem;color:#58584e;line-height:1.5;margin-bottom:14px">
+        Set each day as fully available, unavailable, or available between specific times. Changes are visible to managers immediately.
+      </div>
+      <div id="availability-save-message" style="display:none;margin-bottom:12px"></div>
+      <div style="display:flex;flex-direction:column;gap:9px">
+        ${days.map(day => {
+          const entry = availabilityForDay_(emp, day);
+          return `
+            <div style="border:1px solid rgba(24,24,22,.09);border-radius:14px;padding:12px;background:#fff" data-availability-day="${day}">
+              <div style="display:grid;grid-template-columns:54px minmax(0,1fr);gap:10px;align-items:center">
+                <div style="font-weight:750;font-size:.86rem">${day}</div>
+                <select class="input availability-mode" data-day="${day}" onchange="updateAvailabilityRow('${day}')" style="padding:9px 10px">
+                  <option value="full" ${entry.mode === 'full' ? 'selected' : ''}>Available all day</option>
+                  <option value="times" ${entry.mode === 'times' ? 'selected' : ''}>Available between times</option>
+                  <option value="unavailable" ${entry.mode === 'unavailable' ? 'selected' : ''}>Unavailable</option>
+                </select>
+              </div>
+              <div class="availability-times" id="availability-times-${day}" style="display:${entry.mode === 'times' ? 'grid' : 'none'};grid-template-columns:1fr 1fr;gap:10px;margin-top:10px;padding-left:64px">
+                <div class="input-wrap">
+                  <label>From</label>
+                  <input class="input availability-start" data-day="${day}" type="time" value="${esc(entry.start || '09:00')}">
+                </div>
+                <div class="input-wrap">
+                  <label>Until</label>
+                  <input class="input availability-end" data-day="${day}" type="time" value="${esc(entry.end || '17:00')}">
+                </div>
+              </div>
+            </div>`;
+        }).join('')}
+      </div>
+      <div class="btn-row" style="margin-top:14px">
+        <button class="btn btn-primary" id="availability-save-btn" onclick="saveAvailability()">Save availability</button>
+      </div>
+    </div>`;
+}
+
+window.updateAvailabilityRow = function(day) {
+  const mode = qs(`.availability-mode[data-day="${day}"]`)?.value || 'full';
+  const times = qs(`#availability-times-${day}`);
+  if (times) times.style.display = mode === 'times' ? 'grid' : 'none';
+};
+
+window.saveAvailability = async function() {
+  const btn = qs('#availability-save-btn');
+  const message = qs('#availability-save-message');
+  const days = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+  const availability = {};
+
+  for (const day of days) {
+    const mode = qs(`.availability-mode[data-day="${day}"]`)?.value || 'full';
+    const start = qs(`.availability-start[data-day="${day}"]`)?.value || '';
+    const end = qs(`.availability-end[data-day="${day}"]`)?.value || '';
+
+    if (mode === 'times') {
+      if (!start || !end) {
+        toast(`Please enter both times for ${day}.`, 'error');
+        return;
+      }
+      if (parseTime(end) <= parseTime(start)) {
+        toast(`${day}'s end time must be after its start time.`, 'error');
+        return;
+      }
+      availability[day] = { mode: 'times', start, end };
+    } else if (mode === 'unavailable') {
+      availability[day] = { mode: 'unavailable', start: '', end: '' };
+    } else {
+      availability[day] = { mode: 'full', start: '', end: '' };
+    }
+  }
+
+  if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
+  try {
+    const { error } = await supabase
+      .from('staff')
+      .update({ availability })
+      .eq('id', state.emp.id);
+    if (error) throw new Error(error.message);
+
+    state.emp = { ...state.emp, availability };
+    const staff = getList('staff').map(person =>
+      normaliseId_(person.id) === normaliseId_(state.emp.id)
+        ? { ...person, availability }
+        : person
+    );
+    state.allData.rx3_staff = JSON.stringify(staff);
+
+    if (message) {
+      message.style.display = 'block';
+      message.className = 'helper-note';
+      message.style.cssText = 'display:block;margin-bottom:12px;background:rgba(15,110,86,.08);border:1px solid rgba(15,110,86,.18);color:#0F6E56;border-radius:10px;padding:10px 12px;font-size:.8rem';
+      message.textContent = 'Availability saved and synced with the manager portal.';
+    }
+    toast('Availability updated ✓', 'success');
+  } catch (error) {
+    toast('Could not save availability: ' + error.message, 'error', 5000);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Save availability'; }
+  }
+};
+
 // ── HOURS ──────────────────────────────────────────────────────
 function renderHours() {
   const emp    = state.emp;
@@ -2850,6 +2993,8 @@ function renderHours() {
       <div class="kpi"><div class="kpi-label">Upcoming</div><div class="kpi-value">${futH.toFixed(1)}h</div></div>
       <div class="kpi"><div class="kpi-label">Status</div><div class="kpi-value" style="font-size:1rem;color:#0F6E56">Live ✓</div></div>
     </div>
+    <div class="section-label">Availability</div>
+    ${availabilityEditorHTML_(emp)}
     <div class="section-label">Recent shifts</div>
     <div class="info-grid">
       ${rec.length?rec.map(s=>`
@@ -2865,19 +3010,41 @@ function renderHours() {
 
 // ── PROFILE ────────────────────────────────────────────────────
 function renderProfile() {
-  const emp=state.emp;
-  qs('#view-profile').innerHTML=`
+  const emp = state.emp;
+  qs('#view-profile').innerHTML = `
     <div class="page-header stack">
       <h1 class="page-title">Profile</h1>
-      <div class="page-subtitle">Your account details.</div>
+      <div class="page-subtitle">Review and update your personal details.</div>
     </div>
-    <div class="info-grid">
-      <div class="card">
-        <div class="list-title" style="font-size:1.18rem">${esc(emp.first)} ${esc(emp.last)}</div>
-        <div class="list-copy">${esc(emp.role)}</div>
+
+    <div class="card" style="margin-bottom:18px">
+      <div class="list-title" style="font-size:1.18rem">${esc(emp.first)} ${esc(emp.last)}</div>
+      <div class="list-copy">${esc(emp.role)}</div>
+    </div>
+
+    <div class="section-label">Personal details</div>
+    <div class="card" style="margin-bottom:18px">
+      <div id="profile-save-message" style="display:none;margin-bottom:12px"></div>
+      <div class="form-grid">
+        <div class="input-wrap full-span">
+          <label>Email address</label>
+          <input class="input" id="profile-email" type="email" autocomplete="email" value="${esc(emp.email || '')}" placeholder="name@example.com">
+        </div>
+        <div class="input-wrap">
+          <label>Phone number</label>
+          <input class="input" id="profile-phone" type="tel" autocomplete="tel" value="${esc(emp.phone || '')}" placeholder="04xx xxx xxx">
+        </div>
+        <div class="input-wrap">
+          <label>Date of birth</label>
+          <input class="input" id="profile-dob" type="date" value="${esc(cleanDate_(emp.dob || ''))}">
+        </div>
+        <div class="btn-row full-span">
+          <button class="btn btn-primary" id="profile-save-btn" onclick="savePersonalDetails()">Save personal details</button>
+        </div>
       </div>
-      ${emp.email?`<div class="card"><div class="small-muted">Email</div><div class="list-title" style="font-size:1rem;margin-top:6px">${esc(emp.email)}</div></div>`:''}
-      ${emp.phone?`<div class="card"><div class="small-muted">Phone</div><div class="list-title" style="font-size:1rem;margin-top:6px">${esc(emp.phone)}</div></div>`:''}
+      <div style="font-size:.75rem;color:#707067;line-height:1.45;margin-top:10px">
+        These details sync directly with your staff record in the manager portal.
+      </div>
     </div>
 
     <div class="section-label" style="margin-top:24px">Security</div>
@@ -2905,6 +3072,55 @@ function renderProfile() {
       <button class="btn btn-secondary" onclick="signOut()">Sign out</button>
     </div>`;
 }
+
+window.savePersonalDetails = async function() {
+  const email = (qs('#profile-email')?.value || '').trim().toLowerCase();
+  const phone = (qs('#profile-phone')?.value || '').trim();
+  const dob = (qs('#profile-dob')?.value || '').trim();
+  const btn = qs('#profile-save-btn');
+  const message = qs('#profile-save-message');
+
+  if (!email || !/^\S+@\S+\.\S+$/.test(email)) {
+    toast('Please enter a valid email address.', 'error');
+    return;
+  }
+
+  if (dob && dob > today()) {
+    toast('Date of birth cannot be in the future.', 'error');
+    return;
+  }
+
+  if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
+  try {
+    const { data, error } = await supabase
+      .from('staff')
+      .update({ email, phone, dob: dob || null })
+      .eq('id', state.emp.id)
+      .select('*')
+      .single();
+    if (error) throw new Error(error.message);
+
+    state.emp = { ...state.emp, ...(data || {}), email, phone, dob };
+    const staff = getList('staff').map(person =>
+      normaliseId_(person.id) === normaliseId_(state.emp.id)
+        ? { ...person, ...(data || {}), email, phone, dob }
+        : person
+    );
+    state.allData.rx3_staff = JSON.stringify(staff);
+    localStorage.setItem('dukasa_sx', JSON.stringify({ id: state.emp.id, email, ts: Date.now() }));
+
+    if (message) {
+      message.style.display = 'block';
+      message.style.cssText = 'display:block;margin-bottom:12px;background:rgba(15,110,86,.08);border:1px solid rgba(15,110,86,.18);color:#0F6E56;border-radius:10px;padding:10px 12px;font-size:.8rem';
+      message.textContent = 'Personal details saved and synced with the manager portal.';
+    }
+    toast('Personal details updated ✓', 'success');
+  } catch (error) {
+    toast('Could not save personal details: ' + error.message, 'error', 5000);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Save personal details'; }
+  }
+};
 
 window.changePin = async function() {
   const pin1 = (qs('#pc-pin1')?.value||'').trim();

@@ -1548,6 +1548,11 @@ function approvedAnnualLeave_() {
     .sort((a, b) => a.from.localeCompare(b.from) || String(a.person.first || '').localeCompare(String(b.person.first || '')));
 }
 
+function staffLeaveColour_(person) {
+  const colour = String(person?.color || '#534AB7').trim();
+  return /^#[0-9a-f]{6}$/i.test(colour) ? colour : '#534AB7';
+}
+
 function leaveCalendarHTML_() {
   const approved = approvedAnnualLeave_();
   const [year, month] = String(state.leaveCalendarMonth || today().slice(0, 7)).split('-').map(Number);
@@ -1556,7 +1561,7 @@ function leaveCalendarHTML_() {
   const monthLabel = first.toLocaleDateString('en-AU', { month: 'long', year: 'numeric' });
   const td = today();
   const upcomingEnd = addDays(td, 90);
-  const upcoming = approved.filter(leave => leave.to >= td && leave.from <= upcomingEnd).slice(0, 8);
+  const upcoming = approved.filter(leave => leave.to >= td && leave.from <= upcomingEnd).slice(0, 12);
   const weekdays = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
   const cells = [];
 
@@ -1569,13 +1574,20 @@ function leaveCalendarHTML_() {
     const visible = dayLeave.slice(0, 2);
 
     cells.push(`
-      <div class="team-leave-day ${inMonth ? '' : 'is-outside'} ${ds === td ? 'is-today' : ''}" aria-label="${esc(FD(ds))}">
+      <button type="button" class="team-leave-day ${inMonth ? '' : 'is-outside'} ${ds === td ? 'is-today' : ''} ${dayLeave.length ? 'has-leave' : ''}"
+        aria-label="${esc(FD(ds))}${dayLeave.length ? `, ${dayLeave.length} ${dayLeave.length === 1 ? 'person' : 'people'} away` : ', no one away'}"
+        onclick="openLeaveDayPopup('${ds}')">
         <div class="team-leave-date">${date.getDate()}</div>
         <div class="team-leave-events">
-          ${visible.map(leave => `<div class="team-leave-pill" title="${esc(`${leave.person.first} ${leave.person.last || ''}`.trim())}">${esc(leave.person.first)}${leave.person.last ? ` ${esc(String(leave.person.last).charAt(0))}.` : ''}</div>`).join('')}
+          ${visible.map(leave => {
+            const colour = staffLeaveColour_(leave.person);
+            const fullName = `${leave.person.first || ''} ${leave.person.last || ''}`.trim();
+            const shortName = `${leave.person.first || ''}${leave.person.last ? ` ${String(leave.person.last).charAt(0)}.` : ''}`;
+            return `<div class="team-leave-pill" style="--leave-colour:${colour}" title="${esc(fullName)}">${esc(shortName)}</div>`;
+          }).join('')}
           ${dayLeave.length > 2 ? `<div class="team-leave-more">+${dayLeave.length - 2} more</div>` : ''}
         </div>
-      </div>`);
+      </button>`);
   }
 
   return `
@@ -1590,31 +1602,52 @@ function leaveCalendarHTML_() {
       .team-leave-weekdays{border:1px solid rgba(24,24,22,.09);border-bottom:0;border-radius:14px 14px 0 0;overflow:hidden;background:#f5f5f0}
       .team-leave-weekday{text-align:center;padding:7px 2px;font-size:.64rem;font-weight:700;letter-spacing:.05em;color:#77776e;text-transform:uppercase}
       .team-leave-grid{border-left:1px solid rgba(24,24,22,.09);border-top:1px solid rgba(24,24,22,.09)}
-      .team-leave-day{min-height:84px;padding:6px;border-right:1px solid rgba(24,24,22,.09);border-bottom:1px solid rgba(24,24,22,.09);background:#fff;min-width:0}
-      .team-leave-day:nth-last-child(-n+7):first-child{border-radius:0 0 0 14px}
+      .team-leave-day{appearance:none;-webkit-appearance:none;text-align:left;font-family:inherit;color:inherit;min-height:84px;padding:6px;border:0;border-right:1px solid rgba(24,24,22,.09);border-bottom:1px solid rgba(24,24,22,.09);background:#fff;min-width:0;cursor:pointer;transition:background .15s ease,box-shadow .15s ease}
+      .team-leave-day:hover,.team-leave-day:focus-visible{background:#f8f7ff;outline:none;box-shadow:inset 0 0 0 2px rgba(83,74,183,.35)}
       .team-leave-day.is-outside{background:#fafaf7;color:#aaa}
+      .team-leave-day.is-outside:hover{background:#f4f3fb}
       .team-leave-day.is-today{box-shadow:inset 0 0 0 2px #534AB7}
+      .team-leave-day.has-leave{background:#fdfdfb}
       .team-leave-date{font-size:.7rem;font-weight:700;margin-bottom:5px}
-      .team-leave-events{display:flex;flex-direction:column;gap:3px}
-      .team-leave-pill{background:#EEEDFE;color:#3C3489;border-radius:5px;padding:3px 5px;font-size:.63rem;font-weight:700;line-height:1.15;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-      .team-leave-more{font-size:.61rem;color:#707067;padding-left:3px}
+      .team-leave-events{display:flex;flex-direction:column;gap:3px;pointer-events:none}
+      .team-leave-pill{background:color-mix(in srgb,var(--leave-colour) 14%,white);color:var(--leave-colour);border:1px solid color-mix(in srgb,var(--leave-colour) 38%,white);border-left:3px solid var(--leave-colour);border-radius:5px;padding:3px 5px;font-size:.63rem;font-weight:750;line-height:1.15;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+      .team-leave-more{font-size:.61rem;color:#707067;padding-left:3px;font-weight:650}
       .team-leave-upcoming{display:none}
-      .team-leave-upcoming-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 0;border-bottom:1px solid rgba(24,24,22,.08)}
+      .team-leave-upcoming-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 0;border-bottom:1px solid rgba(24,24,22,.08);cursor:pointer;border-radius:8px}
       .team-leave-upcoming-row:last-child{border-bottom:0}
-      .team-leave-name{font-size:.83rem;font-weight:700}
-      .team-leave-dates{font-size:.74rem;color:#707067;white-space:nowrap}
+      .team-leave-upcoming-row:hover{background:#f7f6fc}
+      .team-leave-person{display:flex;align-items:center;gap:9px;min-width:0}
+      .team-leave-dot{width:10px;height:10px;border-radius:50%;background:var(--leave-colour);flex-shrink:0;box-shadow:0 0 0 3px color-mix(in srgb,var(--leave-colour) 14%,white)}
+      .team-leave-name{font-size:.83rem;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+      .team-leave-dates{font-size:.74rem;color:#707067;white-space:nowrap;text-align:right}
+      .leave-day-overlay{position:fixed;inset:0;background:rgba(15,15,14,.42);backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px);z-index:9998;display:flex;align-items:center;justify-content:center;padding:18px;animation:leaveFadeIn .16s ease}
+      .leave-day-modal{width:100%;max-width:430px;max-height:min(620px,88dvh);overflow:auto;background:#fff;border-radius:20px;box-shadow:0 22px 60px rgba(0,0,0,.24);padding:20px;animation:leaveModalIn .2s cubic-bezier(.22,.8,.3,1)}
+      .leave-day-modal-head{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;padding-bottom:14px;border-bottom:1px solid rgba(24,24,22,.09)}
+      .leave-day-modal-title{font-size:1.05rem;font-weight:800;color:#181816}
+      .leave-day-modal-sub{font-size:.76rem;color:#77776e;margin-top:2px}
+      .leave-day-close{width:32px;height:32px;border-radius:50%;border:1px solid rgba(24,24,22,.12);background:#f6f6f1;font-size:20px;line-height:1;cursor:pointer;color:#58584e;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+      .leave-day-close:hover{background:#ecebe5}
+      .leave-day-list{padding-top:6px}
+      .leave-day-person{display:flex;align-items:center;gap:12px;padding:13px 2px;border-bottom:1px solid rgba(24,24,22,.08)}
+      .leave-day-person:last-child{border-bottom:0}
+      .leave-day-avatar{width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:color-mix(in srgb,var(--leave-colour) 15%,white);color:var(--leave-colour);border:1px solid color-mix(in srgb,var(--leave-colour) 38%,white);font-size:.72rem;font-weight:800;flex-shrink:0}
+      .leave-day-person-name{font-size:.88rem;font-weight:750;color:#181816}
+      .leave-day-person-range{font-size:.73rem;color:#77776e;margin-top:2px}
+      .leave-day-empty{text-align:center;padding:30px 12px 22px;color:#77776e;font-size:.84rem}
+      @keyframes leaveFadeIn{from{opacity:0}to{opacity:1}}
+      @keyframes leaveModalIn{from{opacity:0;transform:translateY(10px) scale(.98)}to{opacity:1;transform:none}}
       @media(max-width:680px){
-        .team-leave-head{align-items:center}.team-leave-copy{max-width:210px}
+        .team-leave-head{align-items:center}.team-leave-copy{max-width:240px}
         .team-leave-calendar-desktop{display:none}.team-leave-upcoming{display:block}
         .team-leave-month{min-width:112px}.team-leave-day{min-height:62px;padding:4px}
       }
-      @media(max-width:420px){.team-leave-head{align-items:flex-start;flex-direction:column}.team-leave-nav{width:100%;justify-content:space-between}}
+      @media(max-width:420px){.team-leave-head{align-items:flex-start;flex-direction:column}.team-leave-nav{width:100%;justify-content:space-between}.leave-day-modal{border-radius:18px;padding:18px}}
     </style>
     <div class="card team-leave-card">
       <div class="team-leave-head">
         <div>
           <div class="team-leave-title">Who’s away</div>
-          <div class="team-leave-copy">Approved annual leave only. Leave reasons and personal details remain private.</div>
+          <div class="team-leave-copy">Approved annual leave only. Select any date to see everyone away. Leave reasons remain private.</div>
         </div>
         <div class="team-leave-nav">
           <button class="btn btn-secondary btn-sm" onclick="changeLeaveCalendarMonth(-1)" aria-label="Previous month">‹</button>
@@ -1627,11 +1660,15 @@ function leaveCalendarHTML_() {
         <div class="team-leave-grid">${cells.join('')}</div>
       </div>
       <div class="team-leave-upcoming">
-        ${upcoming.length ? upcoming.map(leave => `
-          <div class="team-leave-upcoming-row">
-            <div class="team-leave-name">${esc(`${leave.person.first} ${leave.person.last || ''}`.trim())}</div>
+        ${upcoming.length ? upcoming.map(leave => {
+          const colour = staffLeaveColour_(leave.person);
+          const dateToOpen = leave.from < td ? td : leave.from;
+          return `
+          <div class="team-leave-upcoming-row" role="button" tabindex="0" onclick="openLeaveDayPopup('${dateToOpen}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openLeaveDayPopup('${dateToOpen}')}" style="--leave-colour:${colour}">
+            <div class="team-leave-person"><span class="team-leave-dot"></span><div class="team-leave-name">${esc(`${leave.person.first} ${leave.person.last || ''}`.trim())}</div></div>
             <div class="team-leave-dates">${esc(FDS(leave.from))}${leave.to !== leave.from ? ` – ${esc(FDS(leave.to))}` : ''}</div>
-          </div>`).join('') : '<div class="helper-note">No approved annual leave in the next 90 days.</div>'}
+          </div>`;
+        }).join('') : '<div class="helper-note">No approved annual leave in the next 90 days.</div>'}
       </div>
     </div>`;
 }
@@ -1642,6 +1679,65 @@ window.changeLeaveCalendarMonth = function(delta) {
   state.leaveCalendarMonth = localISO(next).slice(0, 7);
   renderLeave();
 };
+
+window.openLeaveDayPopup = function(date) {
+  const cleanDate = cleanDate_(date);
+  const peopleAway = approvedAnnualLeave_().filter(leave => leave.from <= cleanDate && leave.to >= cleanDate);
+  const existing = document.getElementById('leave-day-overlay');
+  if (existing) existing.remove();
+
+  const overlay = document.createElement('div');
+  overlay.id = 'leave-day-overlay';
+  overlay.className = 'leave-day-overlay';
+  overlay.setAttribute('role', 'dialog');
+  overlay.setAttribute('aria-modal', 'true');
+  overlay.setAttribute('aria-label', `Staff away on ${FD(cleanDate)}`);
+  overlay.onclick = event => { if (event.target === overlay) closeLeaveDayPopup(); };
+
+  overlay.innerHTML = `
+    <div class="leave-day-modal">
+      <div class="leave-day-modal-head">
+        <div>
+          <div class="leave-day-modal-title">Who’s away</div>
+          <div class="leave-day-modal-sub">${esc(FD(cleanDate))} · ${peopleAway.length} ${peopleAway.length === 1 ? 'person' : 'people'}</div>
+        </div>
+        <button type="button" class="leave-day-close" onclick="closeLeaveDayPopup()" aria-label="Close">×</button>
+      </div>
+      ${peopleAway.length ? `
+        <div class="leave-day-list">
+          ${peopleAway.map(leave => {
+            const colour = staffLeaveColour_(leave.person);
+            const fullName = `${leave.person.first || ''} ${leave.person.last || ''}`.trim();
+            const leaveRange = leave.from === leave.to ? FD(leave.from) : `${FDS(leave.from)} – ${FDS(leave.to)}`;
+            return `
+              <div class="leave-day-person" style="--leave-colour:${colour}">
+                <div class="leave-day-avatar">${esc(initials(leave.person))}</div>
+                <div>
+                  <div class="leave-day-person-name">${esc(fullName)}</div>
+                  <div class="leave-day-person-range">Annual leave · ${esc(leaveRange)}</div>
+                </div>
+              </div>`;
+          }).join('')}
+        </div>` : `
+        <div class="leave-day-empty">No staff members are on approved annual leave on this date.</div>`}
+    </div>`;
+
+  document.body.appendChild(overlay);
+  overlay.querySelector('.leave-day-close')?.focus();
+};
+
+window.closeLeaveDayPopup = function() {
+  document.getElementById('leave-day-overlay')?.remove();
+};
+
+if (!window.__leaveCalendarEscapeBound) {
+  window.__leaveCalendarEscapeBound = true;
+  document.addEventListener('keydown', event => {
+    if (event.key === 'Escape' && document.getElementById('leave-day-overlay')) {
+      closeLeaveDayPopup();
+    }
+  });
+}
 
 function renderLeave() {
   const emp    = state.emp;

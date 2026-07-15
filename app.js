@@ -2132,7 +2132,7 @@ window.submitLeave = async function() {
     btn.textContent = 'Submitting...';
   }
 
-  const reqs = getList('leaveRequests');
+const reqs = getList('leaveRequests');
 
 const newReq = {
   id: 'lr' + Date.now(),
@@ -2146,6 +2146,8 @@ const newReq = {
   notes,
   status: 'pending',
 
+  submitted: new Date().toISOString(),
+
   requestKind: kind,
 
   partialStart:
@@ -2158,18 +2160,18 @@ const newReq = {
       ? partialEnd
       : null,
 
+  medicalCertificateRequired:
+    type === 'Sick Leave',
+
   syncedToRoster: false,
   syncedToLeaveTracker: false,
 
   changeRequested: false,
-
-  medicalCertificateRequired:
-    type === 'Sick Leave',
-
-  submitted: new Date().toISOString()
+  denialReason: null,
+  processedAt: null
 };
 
-  reqs.push(newReq);
+reqs.push(newReq);
 
   try {
     await saveList('leaveRequests', reqs);

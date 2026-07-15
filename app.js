@@ -366,122 +366,22 @@ function getList(key) {
     if (key === 'sickDays') {
       arr.forEach(s => { if (s.date && s.date.length > 10) s.date = cleanDate_(s.date); });
     }
-if (key === 'leaveRequests') {
-  copy.emp_id = copy.empId ?? copy.emp_id;
-
-  copy.change_requested = Boolean(
-    copy.changeRequested ??
-    copy.change_requested ??
-    false
-  );
-
-  copy.previous_from =
-    copy.previousFrom ??
-    copy.previous_from ??
-    null;
-
-  copy.previous_to =
-    copy.previousTo ??
-    copy.previous_to ??
-    null;
-
-  copy.previous_type =
-    copy.previousType ??
-    copy.previous_type ??
-    null;
-
-  copy.previous_status =
-    copy.previousStatus ??
-    copy.previous_status ??
-    null;
-
-  copy.edited_at =
-    copy.editedAt ??
-    copy.edited_at ??
-    null;
-
-  copy.last_edited_by =
-    copy.lastEditedBy ??
-    copy.last_edited_by ??
-    null;
-
-  // Partial-day leave fields
-  copy.request_kind =
-    copy.requestKind ??
-    copy.request_kind ??
-    'full_day';
-
-  copy.partial_start =
-    copy.request_kind === 'partial_day'
-      ? (
-          copy.partialStart ??
-          copy.partial_start ??
-          null
-        )
-      : null;
-
-  copy.partial_end =
-    copy.request_kind === 'partial_day'
-      ? (
-          copy.partialEnd ??
-          copy.partial_end ??
-          null
-        )
-      : null;
-
-  copy.medical_certificate_required = Boolean(
-    copy.medicalCertificateRequired ??
-    copy.medical_certificate_required ??
-    false
-  );
-
-  // Required Supabase synchronisation fields
-  copy.synced_to_roster = Boolean(
-    copy.syncedToRoster ??
-    copy.synced_to_roster ??
-    false
-  );
-
-  copy.synced_to_leave_tracker = Boolean(
-    copy.syncedToLeaveTracker ??
-    copy.synced_to_leave_tracker ??
-    false
-  );
-
-  copy.denial_reason =
-    copy.denialReason ??
-    copy.denial_reason ??
-    null;
-
-  copy.processed_at =
-    copy.processedAt ??
-    copy.processed_at ??
-    null;
-
-  // Remove browser-only camelCase properties
-  delete copy.empId;
-
-  delete copy.changeRequested;
-  delete copy.previousFrom;
-  delete copy.previousTo;
-  delete copy.previousType;
-  delete copy.previousStatus;
-
-  delete copy.editedAt;
-  delete copy.lastEditedBy;
-
-  delete copy.requestKind;
-  delete copy.partialStart;
-  delete copy.partialEnd;
-  delete copy.medicalCertificateRequired;
-
-  delete copy.syncedToRoster;
-  delete copy.syncedToLeaveTracker;
-
-  delete copy.denialReason;
-  delete copy.processedAt;
+    if (key === 'leaveRequests') {
+      arr.forEach(l => {
+        if (l.from && l.from.length > 10) l.from = cleanDate_(l.from);
+        if (l.to   && l.to.length   > 10) l.to   = cleanDate_(l.to);
+      });
+    }
+    if (key === 'clockEvents') {
+      arr.forEach(e => {
+        if (e.date && e.date.length > 10) e.date = cleanDate_(e.date);
+        if (e.time && e.time.length > 5)  e.time = cleanTime_(e.time);
+      });
+    }
+    return arr;
+  } catch(e){ return []; }
 }
-    
+
 function cleanTime_(str) {
   // Extract HH:MM from any date string e.g. "Sat Dec 30 1899 09:00:00 GMT+1000..."
   if (!str) return str;
@@ -604,41 +504,55 @@ const tableMap = {
     }
 
 if (key === 'leaveRequests') {
+  copy.emp_id = copy.empId ?? copy.emp_id;
 
-  copy.emp_id = copy.empId;
+  copy.change_requested = Boolean(copy.changeRequested ?? copy.change_requested ?? false);
+  copy.previous_from = copy.previousFrom ?? copy.previous_from ?? null;
+  copy.previous_to = copy.previousTo ?? copy.previous_to ?? null;
+  copy.previous_type = copy.previousType ?? copy.previous_type ?? null;
+  copy.previous_status = copy.previousStatus ?? copy.previous_status ?? null;
 
-  copy.change_requested = copy.changeRequested;
-  copy.previous_from = copy.previousFrom;
-  copy.previous_to = copy.previousTo;
-  copy.previous_type = copy.previousType;
-  copy.previous_status = copy.previousStatus;
+  copy.edited_at = copy.editedAt ?? copy.edited_at ?? null;
+  copy.last_edited_by = copy.lastEditedBy ?? copy.last_edited_by ?? null;
 
-  copy.edited_at = copy.editedAt;
-  copy.last_edited_by = copy.lastEditedBy;
+  // Partial leave fields shared with the manager portal.
+  copy.request_kind = copy.requestKind ?? copy.request_kind ?? 'full_day';
+  copy.partial_start = copy.request_kind === 'partial_day'
+    ? (copy.partialStart ?? copy.partial_start ?? null)
+    : null;
+  copy.partial_end = copy.request_kind === 'partial_day'
+    ? (copy.partialEnd ?? copy.partial_end ?? null)
+    : null;
+  copy.medical_certificate_required = Boolean(
+    copy.medicalCertificateRequired ?? copy.medical_certificate_required ?? false
+  );
 
-  // ── PARTIAL LEAVE SUPPORT ─────────────────────
-  copy.request_kind = copy.requestKind || 'full_day';
-  copy.partial_start = copy.partialStart || null;
-  copy.partial_end = copy.partialEnd || null;
-  copy.medical_certificate_required =
-    copy.medicalCertificateRequired || false;
+  // These Supabase columns are NOT NULL. A pending staff request must always
+  // start unsynchronised so the manager portal can process it after approval.
+  copy.synced_to_roster = Boolean(copy.syncedToRoster ?? copy.synced_to_roster ?? false);
+  copy.synced_to_leave_tracker = Boolean(
+    copy.syncedToLeaveTracker ?? copy.synced_to_leave_tracker ?? false
+  );
+
+  copy.denial_reason = copy.denialReason ?? copy.denial_reason ?? null;
+  copy.processed_at = copy.processedAt ?? copy.processed_at ?? null;
 
   delete copy.empId;
-
   delete copy.changeRequested;
   delete copy.previousFrom;
   delete copy.previousTo;
   delete copy.previousType;
   delete copy.previousStatus;
-
   delete copy.editedAt;
   delete copy.lastEditedBy;
-
-  // ── REMOVE CAMELCASE BEFORE SUPABASE SAVE ────
   delete copy.requestKind;
   delete copy.partialStart;
   delete copy.partialEnd;
   delete copy.medicalCertificateRequired;
+  delete copy.syncedToRoster;
+  delete copy.syncedToLeaveTracker;
+  delete copy.denialReason;
+  delete copy.processedAt;
 }
 
     if (key === 'otRequests') {
@@ -2132,46 +2046,29 @@ window.submitLeave = async function() {
     btn.textContent = 'Submitting...';
   }
 
-const reqs = getList('leaveRequests');
+  const reqs = getList('leaveRequests');
 
-const newReq = {
-  id: 'lr' + Date.now(),
+  const newReq = {
+    id: 'lr' + Date.now(),
+    empId: state.emp.id,
+    type,
+    from,
+    to,
+    notes,
+    status: 'pending',
+    submitted: new Date().toISOString(),
+    requestKind: kind,
+    partialStart: kind === 'partial_day' ? partialStart : null,
+    partialEnd: kind === 'partial_day' ? partialEnd : null,
+    medicalCertificateRequired: type === 'Sick Leave',
+    syncedToRoster: false,
+    syncedToLeaveTracker: false,
+    changeRequested: false,
+    denialReason: null,
+    processedAt: null
+  };
 
-  empId: state.emp.id,
-  type,
-
-  from,
-  to,
-
-  notes,
-  status: 'pending',
-
-  submitted: new Date().toISOString(),
-
-  requestKind: kind,
-
-  partialStart:
-    kind === 'partial_day'
-      ? partialStart
-      : null,
-
-  partialEnd:
-    kind === 'partial_day'
-      ? partialEnd
-      : null,
-
-  medicalCertificateRequired:
-    type === 'Sick Leave',
-
-  syncedToRoster: false,
-  syncedToLeaveTracker: false,
-
-  changeRequested: false,
-  denialReason: null,
-  processedAt: null
-};
-
-reqs.push(newReq);
+  reqs.push(newReq);
 
   try {
     await saveList('leaveRequests', reqs);

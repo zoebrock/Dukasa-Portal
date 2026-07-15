@@ -2134,8 +2134,6 @@ window.submitLeave = async function() {
 
   const reqs = getList('leaveRequests');
 
-const reqs = getList('leaveRequests');
-
 const newReq = {
   id: 'lr' + Date.now(),
 

@@ -2002,8 +2002,8 @@ window.openLeaveForm = function() {
           </select>
         </div>
 
-        <div class="input-wrap"><label>From</label><input class="input" id="lv-f" type="date"></div>
-        <div class="input-wrap"><label>To</label><input class="input" id="lv-to" type="date"></div>
+        <div class="input-wrap"><label>From</label><input class="input" id="lv-f" type="date" onchange="checkLeaveConflict()"></div>
+        <div class="input-wrap"><label>To</label><input class="input" id="lv-to" type="date" onchange="checkLeaveConflict()"></div>
 
         <div id="lv-partial-fields" class="full-span" style="display:none">
           <div class="form-grid">
@@ -2015,6 +2015,8 @@ window.openLeaveForm = function() {
         <div id="lv-mc-note" class="full-span" style="display:none;background:#FCEBEB;color:#791F1F;border-radius:12px;padding:10px 12px;font-size:.84rem">
           Medical certificate required. After submitting, please upload your certificate below.
         </div>
+
+        <div id="lv-conflict-warn" class="full-span" style="display:none;background:var(--amber-soft);color:var(--amber);border-radius:12px;padding:10px 12px;font-size:.84rem"></div>
 
         <div class="input-wrap full-span"><label>Notes (optional)</label><textarea class="textarea" id="lv-n" placeholder="Any additional context."></textarea></div>
 
@@ -2040,6 +2042,70 @@ window.togglePartialLeaveFields = function(){
   }
 
   togglePartialMCNotice();
+  checkLeaveConflict();
+};
+
+// ── DEPARTMENT LEAVE CONFLICT CHECK ─────────────────────────────
+// Rule: only one staff member per department/role can be on approved leave
+// at the same time. This is a non-blocking warning — staff can still submit.
+function datesOverlap_(from1,to1,from2,to2){ return from1<=to2 && to1>=from2; }
+
+function addDays_(ds,n){
+  const d = new Date(ds+'T00:00:00');
+  d.setDate(d.getDate()+n);
+  return d.toISOString().slice(0,10);
+}
+
+function getApprovedLeaveConflicts_(from,to,role,excludeEmpId){
+  if(!from || !to || !role) return [];
+  const staff = getList('staff');
+  return getList('leaveRequests')
+    .filter(l=>l.status==='approved')
+    .filter(l=>String(l.empId)!==String(excludeEmpId))
+    .filter(l=>datesOverlap_(from,to,l.from,l.to))
+    .map(l=>({ req:l, colleague: staff.find(s=>String(s.id)===String(l.empId)) }))
+    .filter(({colleague})=>colleague && colleague.role===role);
+}
+
+// Searches outward day-by-day (-1, +1, -2, +2, ...) for the nearest date range
+// of the same length that has no department conflict.
+function findNearestNonConflictingLeaveDate_(from,to,role,excludeEmpId){
+  const spanDays = Math.round((new Date(to+'T00:00:00') - new Date(from+'T00:00:00'))/86400000);
+  for(let offset=1; offset<=30; offset++){
+    for(const dir of [-1,1]){
+      const candFrom = addDays_(from, dir*offset);
+      const candTo = addDays_(candFrom, spanDays);
+      if(!getApprovedLeaveConflicts_(candFrom, candTo, role, excludeEmpId).length){
+        return {from:candFrom, to:candTo};
+      }
+    }
+  }
+  return null;
+}
+
+window.checkLeaveConflict = function(){
+  const warnEl = qs('#lv-conflict-warn');
+  if(!warnEl || !state.emp) return;
+
+  const kind = qs('#lv-kind')?.value || 'full_day';
+  const from = qs('#lv-f')?.value;
+  const to = kind === 'partial_day' ? from : (qs('#lv-to')?.value || from);
+
+  if(!from || !to || from > to){ warnEl.style.display='none'; warnEl.innerHTML=''; return; }
+
+  const role = state.emp.role;
+  const conflicts = getApprovedLeaveConflicts_(from, to, role, state.emp.id);
+
+  if(!conflicts.length){ warnEl.style.display='none'; warnEl.innerHTML=''; return; }
+
+  const names = [...new Set(conflicts.map(c=>`${c.colleague.first} ${c.colleague.last}`))].join(' & ');
+  const suggestion = findNearestNonConflictingLeaveDate_(from, to, role, state.emp.id);
+  const suggestionLine = suggestion
+    ? `The nearest dates that don't clash: <strong>${esc(FDS(suggestion.from))}${suggestion.to !== suggestion.from ? ' – ' + esc(FDS(suggestion.to)) : ''}</strong>.`
+    : `We couldn't find a nearby clash-free date within a month — check with your manager.`;
+
+  warnEl.style.display = 'block';
+  warnEl.innerHTML = `⚠ <strong>${esc(names)}</strong> already ${conflicts.length>1?'have':'has'} approved leave over these dates. Only one person per department can be on leave at a time, so this request may not be approved. You can still submit it. ${suggestionLine}`;
 };
 
 window.togglePartialMCNotice = function(){

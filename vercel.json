@@ -6,6 +6,10 @@
       "destination": "/api/gas.js"
     },
     {
+      "source": "/api/sms",
+      "destination": "/api/sms.js"
+    },
+    {
       "source": "/(.*)",
       "destination": "/index.html"
     }

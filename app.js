@@ -778,6 +778,7 @@ function buildApp() {
         <section id="view-roster"  class="view"></section>
         <section id="view-leave"   class="view"></section>
         <section id="view-ot"      class="view"></section>
+        <section id="view-chat"    class="view"></section>
         <section id="view-hours"   class="view"></section>
         <section id="view-profile" class="view"></section>
       </main>
@@ -786,6 +787,7 @@ function buildApp() {
         <button class="tab"        data-view="roster">  <span class="tab-icon">📅</span><span class="tab-label">Roster</span></button>
         <button class="tab"        data-view="leave">   <span class="tab-icon">🌈</span><span class="tab-label">Leave</span></button>
         <button class="tab"        data-view="ot">      <span class="tab-icon">⏰</span><span class="tab-label">OT</span></button>
+        <button class="tab"        data-view="chat">    <span class="tab-icon">💬</span><span class="tab-label">Chat</span><span id="chat-nav-badge" style="display:none;position:absolute;top:2px;right:14px;min-width:15px;height:15px;border-radius:8px;background:#A32D2D;color:#fff;font-size:.6rem;font-weight:700;align-items:center;justify-content:center;padding:0 3px">0</span></button>
         <button class="tab"        data-view="hours">   <span class="tab-icon">🕘</span><span class="tab-label">Hours</span></button>
         <button class="tab"        data-view="profile"> <span class="tab-icon">👤</span><span class="tab-label">Profile</span></button>
       </nav>
@@ -797,6 +799,8 @@ function buildApp() {
   startSync();
   startClockEventsRealtime();
   startShiftsRealtime();
+  startChatListRealtime_();
+  renderChat();
   startTicker();
 }
 
@@ -807,6 +811,7 @@ function nav(name) {
   anim(qs('#view-'+name));
   window.scrollTo({top:0,behavior:'smooth'});
   syncTopbar();
+  if (name === 'chat') renderChat();
 }
 
 window.nav = nav;
@@ -3645,6 +3650,419 @@ function startShiftsRealtime() {
     .subscribe(status => {
       console.log('Staff realtime shifts:', status);
     });
+}
+
+// ── CHAT ──────────────────────────────────────────────────────
+const STAFF_PORTAL_URL_ = 'https://dukasa-portal.vercel.app';
+
+const chatState = {
+  chats: [],
+  activeChatId: null,
+  messages: [],
+  reads: {},
+  members: [],
+  pendingMentions: [],
+  channel: null
+};
+
+function normalisePhoneForSMS_(phone){
+  if(!phone) return '';
+  let p = String(phone).replace(/[\s\-()]/g,'');
+  if(p.startsWith('+')) return p;
+  if(p.startsWith('0')) return '+61' + p.slice(1);
+  if(p.startsWith('61')) return '+' + p;
+  return p;
+}
+
+async function smsPost_(toPhone, message){
+  const to = normalisePhoneForSMS_(toPhone);
+  if(!to) throw new Error('No phone number on file');
+  const res = await fetch('/api/sms', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ to, message })
+  });
+  const text = await res.text();
+  let json;
+  try { json = JSON.parse(text); } catch { json = { ok:false, error:text }; }
+  if(!json.ok) throw new Error(json.error || 'SMS send failed');
+  return json;
+}
+
+async function fetchMyChats_(){
+  const myId = state.emp.id;
+  const [{data:crew,error:e1},{data:mine,error:e2}] = await Promise.all([
+    supabase.from('chats').select('*').eq('type','crew'),
+    supabase.from('chats').select('*').neq('type','crew').contains('member_ids',[myId])
+  ]);
+  if(e1) console.warn('chats(crew) load failed', e1.message);
+  if(e2) console.warn('chats(mine) load failed', e2.message);
+  const chats = [...(crew||[]), ...(mine||[])];
+  chats.sort((a,b)=>(b.updated_at||'').localeCompare(a.updated_at||''));
+  return chats;
+}
+
+async function fetchMyReads_(){
+  const { data, error } = await supabase.from('chat_reads').select('*').eq('reader_id', state.emp.id);
+  if(error){ console.warn('chat_reads load failed', error.message); return {}; }
+  const map = {};
+  (data||[]).forEach(r => map[r.chat_id] = r.last_read_at);
+  return map;
+}
+
+async function loadChatData_(){
+  const [chats, reads] = await Promise.all([fetchMyChats_(), fetchMyReads_()]);
+  chatState.chats = chats;
+  chatState.reads = reads;
+}
+
+async function ensureChatExists_(chatId, defaults){
+  const { data: existing } = await supabase.from('chats').select('*').eq('id', chatId).maybeSingle();
+  if(existing) return existing;
+  const now = new Date().toISOString();
+  const row = { id: chatId, created_at: now, updated_at: now, ...defaults };
+  const { data, error } = await supabase.from('chats').insert(row).select().maybeSingle();
+  if(error) throw error;
+  return data;
+}
+
+async function openDmWithAdmin_(){
+  const myId = state.emp.id;
+  const chatId = 'dm-' + myId;
+  return ensureChatExists_(chatId, {
+    name: 'Dukasa Admin',
+    type: 'dm',
+    member_ids: ['admin', myId],
+    created_by: myId
+  });
+}
+
+async function fetchChatMessages_(chatId, limit=200){
+  const { data, error } = await supabase.from('chat_messages').select('*').eq('chat_id', chatId).order('created_at',{ascending:true}).limit(limit);
+  if(error){ console.warn('fetchChatMessages_ failed', error.message); return []; }
+  return data || [];
+}
+
+async function markChatRead_(chatId){
+  const { error } = await supabase.from('chat_reads').upsert({
+    chat_id: chatId,
+    reader_id: state.emp.id,
+    last_read_at: new Date().toISOString()
+  }, { onConflict: 'chat_id,reader_id' });
+  if(error) console.warn('markChatRead_ failed', error.message);
+}
+
+function chatMembersForMention_(chat){
+  const staff = getList('staff');
+  if(chat.type === 'crew') return staff.filter(s=>String(s.id)!==String(state.emp.id)).map(s=>({id:s.id, name:`${s.first} ${s.last}`}));
+  if(chat.type === 'dm') return [];
+  return (chat.member_ids||[]).filter(id=>id!=='admin' && String(id)!==String(state.emp.id)).map(id=>{
+    const s = staff.find(x=>String(x.id)===String(id));
+    return s ? {id:s.id, name:`${s.first} ${s.last}`} : null;
+  }).filter(Boolean);
+}
+
+// Notifies staff by SMS when @mentioned (individually or via @dukasateam/"all") in a
+// crew or group chat. DMs are notified from whichever side sends the message; staff
+// messaging the admin doesn't SMS the admin — the manager portal is checked in-app.
+async function notifyChatMessage_(chat, msg){
+  if(chat.type === 'dm') return;
+  const staff = getList('staff');
+  const targets = new Set();
+  const mentions = msg.mentions || [];
+  if(mentions.includes('all')){
+    const memberIds = chat.type === 'crew' ? staff.map(s=>s.id) : (chat.member_ids||[]).filter(id=>id!=='admin');
+    memberIds.forEach(id => targets.add(String(id)));
+  }
+  mentions.forEach(id => { if(id !== 'all') targets.add(String(id)); });
+  targets.delete(String(state.emp.id));
+
+  const chatLabel = chat.type === 'crew' ? 'Dukasa Crew' : (chat.name || 'a group chat');
+  const text = `${msg.sender_name} in ${chatLabel}: ${msg.body}`.slice(0, 280) + ` — Staff Portal: ${STAFF_PORTAL_URL_}`;
+
+  for(const id of targets){
+    const person = staff.find(s => String(s.id) === id);
+    if(!person || !person.phone) continue;
+    try { await smsPost_(person.phone, text); }
+    catch(e){ console.warn('Chat SMS to', id, 'failed:', e.message); }
+  }
+}
+
+async function sendChatMessage_(chat, body, mentions){
+  const trimmed = (body||'').trim();
+  if(!trimmed) return;
+  const myId = state.emp.id;
+  const myName = `${state.emp.first||''} ${state.emp.last||''}`.trim() || 'Staff';
+  const now = new Date().toISOString();
+  const msg = {
+    id: 'msg' + Date.now() + Math.random().toString(36).slice(2,7),
+    chat_id: chat.id,
+    sender_id: myId,
+    sender_name: myName,
+    body: trimmed,
+    mentions: mentions || [],
+    created_at: now
+  };
+  const { error } = await supabase.from('chat_messages').insert(msg);
+  if(error) throw error;
+
+  await supabase.from('chats').update({
+    updated_at: now,
+    last_message_preview: trimmed.slice(0,140),
+    last_sender_id: myId
+  }).eq('id', chat.id);
+
+  await markChatRead_(chat.id);
+  notifyChatMessage_(chat, msg).catch(err => console.warn('Chat SMS notify failed:', err.message));
+}
+
+function chatIsUnread_(c){
+  if(String(c.last_sender_id||'') === String(state.emp.id)) return false;
+  if(!c.last_message_preview) return false;
+  const lastRead = chatState.reads[c.id];
+  if(!lastRead) return true;
+  return new Date(c.updated_at) > new Date(lastRead);
+}
+
+function chatBadgeCount_(){
+  return chatState.chats.filter(chatIsUnread_).length;
+}
+
+function updateChatNavBadge_(){
+  const badge = qs('#chat-nav-badge');
+  if(!badge) return;
+  const count = chatBadgeCount_();
+  badge.style.display = count ? 'flex' : 'none';
+  badge.textContent = count;
+}
+
+function chatDisplayName_(c){
+  if(c.type === 'crew') return 'Dukasa Crew';
+  if(c.type === 'dm') return 'Dukasa Admin';
+  return c.name || 'Group chat';
+}
+function chatIcon_(c){
+  if(c.type === 'crew') return '👥';
+  if(c.type === 'dm') return '💬';
+  return '🗂️';
+}
+
+async function renderChat(){
+  if(!state.emp) return;
+  await loadChatData_().catch(e=>console.warn('loadChatData_ failed:', e.message));
+  updateChatNavBadge_();
+  if(chatState.activeChatId){
+    await renderChatThread_();
+  } else {
+    renderChatList_();
+  }
+}
+
+function renderChatList_(){
+  const el = qs('#view-chat');
+  if(!el) return;
+  el.innerHTML = `
+    <div class="page-header">
+      <div>
+        <h1 class="page-title">Chat</h1>
+        <div class="page-subtitle">Message the team or your manager.</div>
+      </div>
+    </div>
+    <div class="info-grid">
+      ${chatState.chats.length ? chatState.chats.map(c => {
+        const unread = chatIsUnread_(c);
+        return `<div class="card list-card" style="cursor:pointer" onclick="openChatThread('${c.id}')">
+          <div style="width:34px;height:34px;border-radius:50%;background:#534AB722;display:flex;align-items:center;justify-content:center;font-size:1rem;flex-shrink:0">${chatIcon_(c)}</div>
+          <div style="flex:1;min-width:0">
+            <div class="list-title" style="font-size:.95rem">${esc(chatDisplayName_(c))}</div>
+            <div class="list-copy" style="margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(c.last_message_preview || 'No messages yet.')}</div>
+          </div>
+          ${unread ? '<span style="width:9px;height:9px;border-radius:50%;background:#534AB7;flex-shrink:0"></span>' : ''}
+        </div>`;
+      }).join('') : ''}
+      <div class="card list-card" style="cursor:pointer;border:1px dashed var(--border)" onclick="openChatThread('dm-${state.emp.id}')">
+        <div style="width:34px;height:34px;border-radius:50%;background:#534AB722;display:flex;align-items:center;justify-content:center;font-size:1rem;flex-shrink:0">💬</div>
+        <div style="flex:1;min-width:0">
+          <div class="list-title" style="font-size:.95rem">Message your manager</div>
+          <div class="list-copy" style="margin-top:2px">Start a direct message with Dukasa Admin.</div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function chatMessageBubble_(m){
+  const mine = String(m.sender_id) === String(state.emp.id);
+  const time = new Date(m.created_at).toLocaleTimeString('en-AU',{hour:'2-digit',minute:'2-digit'});
+  return `<div style="align-self:${mine?'flex-end':'flex-start'};max-width:80%">
+    ${!mine ? `<div style="font-size:.72rem;font-weight:700;color:#534AB7;margin-bottom:2px">${esc(m.sender_name)}</div>` : ''}
+    <div style="background:${mine?'#534AB7':'#f4f2ff'};color:${mine?'#fff':'#181816'};padding:9px 12px;border-radius:14px;${mine?'border-bottom-right-radius:4px':'border-bottom-left-radius:4px'};font-size:.88rem;white-space:pre-wrap;word-break:break-word">${esc(m.body)}</div>
+    <div style="font-size:.68rem;color:#98988f;margin-top:2px;text-align:${mine?'right':'left'}">${time}</div>
+  </div>`;
+}
+
+function scrollChatToBottom_(){
+  const box = qs('#chat-messages');
+  if(box) box.scrollTop = box.scrollHeight;
+}
+
+async function renderChatThread_(){
+  const el = qs('#view-chat');
+  if(!el) return;
+
+  let chat = chatState.chats.find(c => c.id === chatState.activeChatId);
+  if(!chat && String(chatState.activeChatId).startsWith('dm-')){
+    chat = await openDmWithAdmin_();
+    chatState.chats.push(chat);
+  }
+  if(!chat){ closeChatThread(); return; }
+
+  chatState.members = chatMembersForMention_(chat);
+  chatState.pendingMentions = [];
+  const messages = await fetchChatMessages_(chat.id);
+  chatState.messages = messages;
+
+  el.innerHTML = `
+    <div class="page-header">
+      <button class="btn btn-secondary btn-sm" type="button" onclick="closeChatThread()">‹ Back</button>
+      <div><h1 class="page-title" style="font-size:1.3rem">${esc(chatDisplayName_(chat))}</h1></div>
+    </div>
+    <div id="chat-messages" class="card" style="max-height:55vh;overflow-y:auto;display:flex;flex-direction:column;gap:10px;margin-bottom:12px">
+      ${messages.length ? messages.map(chatMessageBubble_).join('') : '<div class="helper-note">No messages yet — say hi!</div>'}
+    </div>
+    <div style="position:relative">
+      <div id="chat-mention-list" style="display:none;position:absolute;bottom:100%;left:0;right:0;background:#fff;border:1px solid #e5e3dd;border-radius:12px;box-shadow:0 8px 24px rgba(0,0,0,.1);max-height:180px;overflow-y:auto;margin-bottom:6px;z-index:20"></div>
+      <div style="display:flex;gap:8px;align-items:flex-end">
+        <textarea class="textarea" id="chat-input" rows="2" placeholder="${chat.type==='dm' ? 'Message your manager…' : 'Message the team… type @ to mention'}" oninput="onChatInput_()" onkeydown="onChatKeydown_(event)" style="flex:1"></textarea>
+        <button class="btn btn-primary" type="button" onclick="submitChatMessage_()">Send</button>
+      </div>
+    </div>
+  `;
+  scrollChatToBottom_();
+  startChatMessagesRealtime_(chat.id);
+}
+
+window.openChatThread = async function(chatId){
+  chatState.activeChatId = chatId;
+  await renderChatThread_();
+  await markChatRead_(chatId);
+  chatState.reads[chatId] = new Date().toISOString();
+  updateChatNavBadge_();
+};
+
+window.closeChatThread = function(){
+  chatState.activeChatId = null;
+  stopChatMessagesRealtime_();
+  renderChatList_();
+  updateChatNavBadge_();
+};
+
+window.onChatInput_ = function(){
+  const ta = qs('#chat-input');
+  const list = qs('#chat-mention-list');
+  if(!ta || !list) return;
+  const cursor = ta.selectionStart;
+  const textBefore = ta.value.slice(0, cursor);
+  const match = textBefore.match(/(^|\s)@(\w*)$/);
+  if(!match){ list.style.display = 'none'; return; }
+  const chat = chatState.chats.find(c=>c.id===chatState.activeChatId);
+  const prefix = match[2].toLowerCase();
+  const options = [];
+  if(chat && chat.type !== 'dm') options.push({id:'all', name:'dukasateam', hint:'Notify everyone in this chat'});
+  chatState.members.forEach(m => options.push({id:m.id, name:m.name, hint:''}));
+  const filtered = options.filter(o => o.name.toLowerCase().replace(/\s/g,'').startsWith(prefix));
+  if(!filtered.length){ list.style.display = 'none'; return; }
+  list.innerHTML = filtered.map(o => `<div style="padding:9px 12px;cursor:pointer;font-size:.85rem" onmousedown="selectMention_('${o.id}')">
+    <strong>@${esc(o.name.replace(/\s/g,''))}</strong>${o.hint?` <span style="color:#98988f;font-size:.75rem">— ${esc(o.hint)}</span>`:''}
+  </div>`).join('');
+  list.style.display = 'block';
+};
+
+window.selectMention_ = function(id){
+  const ta = qs('#chat-input');
+  const list = qs('#chat-mention-list');
+  if(!ta) return;
+  const cursor = ta.selectionStart;
+  const textBefore = ta.value.slice(0, cursor);
+  const textAfter = ta.value.slice(cursor);
+  const match = textBefore.match(/(^|\s)@(\w*)$/);
+  if(!match) return;
+  const option = (id === 'all')
+    ? {id:'all', label:'dukasateam'}
+    : (() => { const m = chatState.members.find(x=>String(x.id)===String(id)); return m ? {id:m.id, label:m.name.replace(/\s/g,'')} : null; })();
+  if(!option) return;
+  const insertion = `@${option.label} `;
+  const newBefore = textBefore.slice(0, match.index) + (match[1]||'') + insertion;
+  ta.value = newBefore + textAfter;
+  const newCursor = newBefore.length;
+  ta.setSelectionRange(newCursor, newCursor);
+  ta.focus();
+  if(!chatState.pendingMentions.includes(option.id)) chatState.pendingMentions.push(option.id);
+  if(list) list.style.display = 'none';
+};
+
+window.onChatKeydown_ = function(e){
+  if(e.key === 'Enter' && !e.shiftKey){
+    e.preventDefault();
+    submitChatMessage_();
+  }
+};
+
+window.submitChatMessage_ = async function(){
+  const ta = qs('#chat-input');
+  if(!ta) return;
+  const body = ta.value;
+  if(!body.trim()) return;
+  let chat = chatState.chats.find(c=>c.id===chatState.activeChatId);
+  if(!chat) chat = await openDmWithAdmin_();
+  const mentions = [...chatState.pendingMentions];
+  ta.value = '';
+  ta.disabled = true;
+  try {
+    await sendChatMessage_(chat, body, mentions);
+    chatState.pendingMentions = [];
+    const messages = await fetchChatMessages_(chat.id);
+    chatState.messages = messages;
+    const box = qs('#chat-messages');
+    if(box){ box.innerHTML = messages.map(chatMessageBubble_).join(''); scrollChatToBottom_(); }
+  } catch(e) {
+    toast('Could not send message: ' + e.message, 'error');
+  } finally {
+    ta.disabled = false;
+    ta.focus();
+  }
+};
+
+function startChatMessagesRealtime_(chatId){
+  stopChatMessagesRealtime_();
+  chatState.channel = supabase
+    .channel('chat-messages-' + chatId)
+    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'chat_messages', filter: `chat_id=eq.${chatId}` }, async () => {
+      if(chatState.activeChatId !== chatId) return;
+      const messages = await fetchChatMessages_(chatId);
+      chatState.messages = messages;
+      const box = qs('#chat-messages');
+      if(box){ box.innerHTML = messages.map(chatMessageBubble_).join(''); scrollChatToBottom_(); }
+      markChatRead_(chatId);
+      chatState.reads[chatId] = new Date().toISOString();
+      updateChatNavBadge_();
+    })
+    .subscribe();
+}
+function stopChatMessagesRealtime_(){
+  if(chatState.channel){ supabase.removeChannel(chatState.channel); chatState.channel = null; }
+}
+
+function startChatListRealtime_(){
+  supabase
+    .channel('chat-list-live')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'chats' }, async () => {
+      if(!state.emp) return;
+      await loadChatData_().catch(()=>{});
+      updateChatNavBadge_();
+      if(state.currentView === 'chat' && !chatState.activeChatId) renderChatList_();
+    })
+    .subscribe(status => console.log('Staff realtime chats:', status));
 }
 
 // ── LOADING ────────────────────────────────────────────────────

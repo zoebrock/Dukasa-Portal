@@ -1184,6 +1184,15 @@ const netHrs = shiftHrs(s);
     </div>
 ${todayCard}
 ${pendingOTSection}
+${(typeof chatBadgeCount_ === 'function' && chatBadgeCount_() > 0) ? `
+  <div class="card" style="margin:14px 0;padding:16px 18px;border:1px solid rgba(83,74,183,.25);background:#f4f2ff;border-radius:18px;display:flex;align-items:center;justify-content:space-between;gap:12px;cursor:pointer" onclick="window.nav('chat')">
+    <div>
+      <div style="font-weight:700;color:#534AB7;margin-bottom:2px">💬 You have unread messages</div>
+      <div style="font-size:13px;color:#585854">${chatBadgeCount_()} chat${chatBadgeCount_()>1?'s':''} with something new.</div>
+    </div>
+    <div style="font-size:1.2rem;color:#534AB7">›</div>
+  </div>
+` : ''}
 ${outstandingMC ? `
   <div class="card card-alert" style="margin:14px 0;padding:18px;border:1px solid rgba(163,45,45,.25);background:#FCEBEB;border-radius:18px">
     <div style="font-weight:700;color:#A32D2D;margin-bottom:6px">Medical certificate required</div>
@@ -3531,7 +3540,6 @@ async function startSync() {
         const viewEl = qs('#view-' + state.currentView);
 
         if (viewEl) {
-          if (state.currentView === 'home') renderHome();
           if (state.currentView === 'roster') renderRoster();
           if (state.currentView === 'leave') renderLeave();
           if (state.currentView === 'ot') renderOT();
@@ -3539,6 +3547,17 @@ async function startSync() {
           if (state.currentView === 'profile') renderProfile();
         }
       }
+
+      // Fallback poll for chat, independent of realtime — keeps the unread
+      // badge, home banner, and thread list accurate even if a realtime
+      // event was missed.
+      if (state.emp) {
+        await loadChatData_().catch(()=>{});
+        updateChatNavBadge_();
+        if (state.currentView === 'chat' && !chatState.activeChatId) renderChatList_();
+      }
+
+      if (state.currentView === 'home') renderHome();
     } catch (e) {
       console.warn('Background sync failed:', e.message);
     }
@@ -3689,24 +3708,36 @@ async function smsPost_(toPhone, message){
   return json;
 }
 
+// A staff record can be recreated with a new id over time (see setEmployeeContext_ —
+// state.empIds holds every id ever associated with this person's email). Chat
+// membership must be checked against ALL of those ids, not just the current one,
+// or a chat created while an older id was live becomes permanently invisible.
 async function fetchMyChats_(){
-  const myId = state.emp.id;
-  const [{data:crew,error:e1},{data:mine,error:e2}] = await Promise.all([
-    supabase.from('chats').select('*').eq('type','crew'),
-    supabase.from('chats').select('*').neq('type','crew').contains('member_ids',[myId])
-  ]);
+  const myIds = (state.empIds && state.empIds.length) ? state.empIds : [state.emp.id];
+  const crewPromise = supabase.from('chats').select('*').eq('type','crew');
+  const minePromises = myIds.map(id => supabase.from('chats').select('*').neq('type','crew').contains('member_ids',[id]));
+  const [{data:crew,error:e1}, ...mineResults] = await Promise.all([crewPromise, ...minePromises]);
   if(e1) console.warn('chats(crew) load failed', e1.message);
-  if(e2) console.warn('chats(mine) load failed', e2.message);
-  const chats = [...(crew||[]), ...(mine||[])];
+  const mineMap = new Map();
+  mineResults.forEach(({data,error}) => {
+    if(error){ console.warn('chats(mine) load failed', error.message); return; }
+    (data||[]).forEach(c => mineMap.set(c.id, c));
+  });
+  const chats = [...(crew||[]), ...mineMap.values()];
   chats.sort((a,b)=>(b.updated_at||'').localeCompare(a.updated_at||''));
   return chats;
 }
 
 async function fetchMyReads_(){
-  const { data, error } = await supabase.from('chat_reads').select('*').eq('reader_id', state.emp.id);
+  const myIds = (state.empIds && state.empIds.length) ? state.empIds : [state.emp.id];
+  const { data, error } = await supabase.from('chat_reads').select('*').in('reader_id', myIds);
   if(error){ console.warn('chat_reads load failed', error.message); return {}; }
   const map = {};
-  (data||[]).forEach(r => map[r.chat_id] = r.last_read_at);
+  // If more than one id has a read row for the same chat (from an id change),
+  // keep the most recent.
+  (data||[]).forEach(r => {
+    if(!map[r.chat_id] || new Date(r.last_read_at) > new Date(map[r.chat_id])) map[r.chat_id] = r.last_read_at;
+  });
   return map;
 }
 
@@ -3726,11 +3757,17 @@ async function ensureChatExists_(chatId, defaults){
   return data;
 }
 
+// Resolves "my DM with the admin" — reuses whichever DM chat already exists in
+// chatState.chats (which may have been created under an older staff id) rather
+// than always assuming the current id, so the thread never appears to "lose"
+// history after a staff record is recreated.
 async function openDmWithAdmin_(){
+  const existing = chatState.chats.find(c => c.type === 'dm');
+  if(existing) return existing;
   const myId = state.emp.id;
   const chatId = 'dm-' + myId;
   return ensureChatExists_(chatId, {
-    name: 'Dukasa Admin',
+    name: 'Zoe - Dukasa',
     type: 'dm',
     member_ids: ['admin', myId],
     created_by: myId
@@ -3765,27 +3802,54 @@ function chatMembersForMention_(chat){
 // Notifies staff by SMS when @mentioned (individually or via @dukasateam/"all") in a
 // crew or group chat. DMs are notified from whichever side sends the message; staff
 // messaging the admin doesn't SMS the admin — the manager portal is checked in-app.
+function myIds_(){
+  return (state.empIds && state.empIds.length) ? state.empIds.map(String) : [String(state.emp.id)];
+}
+
+// Fixed SMS copy for staff, regardless of whether it's a DM or an @mention.
+function chatSmsText_(firstName){
+  return `Hey ${firstName}! You have a new Dukasa message. Please make sure you acknowledge and reply ASAP. ${STAFF_PORTAL_URL_}`;
+}
+
 async function notifyChatMessage_(chat, msg){
-  if(chat.type === 'dm') return;
   const staff = getList('staff');
   const targets = new Set();
-  const mentions = msg.mentions || [];
-  if(mentions.includes('all')){
-    const memberIds = chat.type === 'crew' ? staff.map(s=>s.id) : (chat.member_ids||[]).filter(id=>id!=='admin');
-    memberIds.forEach(id => targets.add(String(id)));
-  }
-  mentions.forEach(id => { if(id !== 'all') targets.add(String(id)); });
-  targets.delete(String(state.emp.id));
 
-  const chatLabel = chat.type === 'crew' ? 'Dukasa Crew' : (chat.name || 'a group chat');
-  const text = `${msg.sender_name} in ${chatLabel}: ${msg.body}`.slice(0, 280) + ` — Staff Portal: ${STAFF_PORTAL_URL_}`;
+  if(chat.type === 'dm'){
+    const otherId = (chat.member_ids||[]).map(String).find(id => id !== 'admin' && !myIds_().includes(id));
+    if(otherId) targets.add(otherId);
+  } else {
+    const mentions = msg.mentions || [];
+    if(mentions.includes('all')){
+      const memberIds = chat.type === 'crew' ? staff.map(s=>s.id) : (chat.member_ids||[]).filter(id=>id!=='admin');
+      memberIds.forEach(id => targets.add(String(id)));
+    }
+    mentions.forEach(id => { if(id !== 'all') targets.add(String(id)); });
+  }
+  myIds_().forEach(id => targets.delete(id));
 
   for(const id of targets){
     const person = staff.find(s => String(s.id) === id);
     if(!person || !person.phone) continue;
-    try { await smsPost_(person.phone, text); }
+    try { await smsPost_(person.phone, chatSmsText_(person.first || 'there')); }
     catch(e){ console.warn('Chat SMS to', id, 'failed:', e.message); }
   }
+}
+
+// The manager (Zoe) wants an SMS to her own staff mobile number for every
+// message an employee sends, in any chat — separate from the mention-based
+// staff notifications above. The number lives in the shared "settings" table
+// (Manager Portal → Settings → Chat notifications).
+async function notifyManagerOfChatMessage_(chat, msg){
+  try {
+    const { data, error } = await supabase.from('settings').select('*').eq('id','settings').maybeSingle();
+    if(error || !data || !data.value) return;
+    const phone = data.value.managerNotifyPhone;
+    if(!phone) return;
+    const chatLabel = chat.type === 'crew' ? 'Dukasa Crew' : chat.type === 'dm' ? 'a direct message' : (chat.name || 'a group chat');
+    const text = `Hey Zoe! New message from ${msg.sender_name} in ${chatLabel} — Dukasa Manager Portal.`;
+    await smsPost_(phone, text);
+  } catch(e){ console.warn('Manager chat SMS notify failed:', e.message); }
 }
 
 async function sendChatMessage_(chat, body, mentions){
@@ -3814,10 +3878,11 @@ async function sendChatMessage_(chat, body, mentions){
 
   await markChatRead_(chat.id);
   notifyChatMessage_(chat, msg).catch(err => console.warn('Chat SMS notify failed:', err.message));
+  notifyManagerOfChatMessage_(chat, msg).catch(err => console.warn('Manager chat SMS notify failed:', err.message));
 }
 
 function chatIsUnread_(c){
-  if(String(c.last_sender_id||'') === String(state.emp.id)) return false;
+  if(myIds_().includes(String(c.last_sender_id||''))) return false;
   if(!c.last_message_preview) return false;
   const lastRead = chatState.reads[c.id];
   if(!lastRead) return true;
@@ -3838,7 +3903,7 @@ function updateChatNavBadge_(){
 
 function chatDisplayName_(c){
   if(c.type === 'crew') return 'Dukasa Crew';
-  if(c.type === 'dm') return 'Dukasa Admin';
+  if(c.type === 'dm') return 'Zoe - Dukasa';
   return c.name || 'Group chat';
 }
 function chatIcon_(c){
@@ -3880,19 +3945,19 @@ function renderChatList_(){
           ${unread ? '<span style="width:9px;height:9px;border-radius:50%;background:#534AB7;flex-shrink:0"></span>' : ''}
         </div>`;
       }).join('') : ''}
-      <div class="card list-card" style="cursor:pointer;border:1px dashed var(--border)" onclick="openChatThread('dm-${state.emp.id}')">
+      ${chatState.chats.some(c=>c.type==='dm') ? '' : `<div class="card list-card" style="cursor:pointer;border:1px dashed var(--border)" onclick="openChatThread('dm-mine')">
         <div style="width:34px;height:34px;border-radius:50%;background:#534AB722;display:flex;align-items:center;justify-content:center;font-size:1rem;flex-shrink:0">💬</div>
         <div style="flex:1;min-width:0">
           <div class="list-title" style="font-size:.95rem">Message your manager</div>
-          <div class="list-copy" style="margin-top:2px">Start a direct message with Dukasa Admin.</div>
+          <div class="list-copy" style="margin-top:2px">Start a direct message with Zoe - Dukasa.</div>
         </div>
-      </div>
+      </div>`}
     </div>
   `;
 }
 
 function chatMessageBubble_(m){
-  const mine = String(m.sender_id) === String(state.emp.id);
+  const mine = myIds_().includes(String(m.sender_id));
   const time = new Date(m.created_at).toLocaleTimeString('en-AU',{hour:'2-digit',minute:'2-digit'});
   return `<div style="align-self:${mine?'flex-end':'flex-start'};max-width:80%">
     ${!mine ? `<div style="font-size:.72rem;font-weight:700;color:#534AB7;margin-bottom:2px">${esc(m.sender_name)}</div>` : ''}

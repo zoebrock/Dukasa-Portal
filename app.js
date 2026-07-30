@@ -2018,7 +2018,7 @@ window.openLeaveForm = function() {
 
         <div id="lv-conflict-warn" class="full-span" style="display:none;background:var(--amber-soft);color:var(--amber);border-radius:12px;padding:10px 12px;font-size:.84rem"></div>
 
-        <div class="input-wrap full-span"><label>Notes (optional)</label><textarea class="textarea" id="lv-n" placeholder="Any additional context."></textarea></div>
+        <div class="input-wrap full-span"><label>Notes / Reason</label><textarea class="textarea" id="lv-n" placeholder="Please provide a reason for this leave request."></textarea></div>
 
         <div id="lv-err" style="display:none;color:#A32D2D;font-size:.82rem" class="full-span">⚠ Please enter valid leave details.</div>
 
@@ -2099,13 +2099,14 @@ window.checkLeaveConflict = function(){
   if(!conflicts.length){ warnEl.style.display='none'; warnEl.innerHTML=''; return; }
 
   const names = [...new Set(conflicts.map(c=>`${c.colleague.first} ${c.colleague.last}`))].join(' & ');
+  const isAre = conflicts.length > 1 ? 'are' : 'is';
   const suggestion = findNearestNonConflictingLeaveDate_(from, to, role, state.emp.id);
   const suggestionLine = suggestion
-    ? `The nearest dates that don't clash: <strong>${esc(FDS(suggestion.from))}${suggestion.to !== suggestion.from ? ' – ' + esc(FDS(suggestion.to)) : ''}</strong>.`
-    : `We couldn't find a nearby clash-free date within a month — check with your manager.`;
+    ? `The nearest available dates without an existing leave conflict are: <strong>${esc(FDS(suggestion.from))}${suggestion.to !== suggestion.from ? ' – ' + esc(FDS(suggestion.to)) : ''}</strong>.`
+    : `We couldn't find nearby dates without a conflict within a month — please check with your manager.`;
 
   warnEl.style.display = 'block';
-  warnEl.innerHTML = `⚠ <strong>${esc(names)}</strong> already ${conflicts.length>1?'have':'has'} approved leave over these dates. Only one person per department can be on leave at a time, so this request may not be approved. You can still submit it. ${suggestionLine}`;
+  warnEl.innerHTML = `⚠ <strong>${esc(names)}</strong> ${isAre} on approved leave during the dates you have selected. As we generally need to limit leave to one team member per department at a time, please be aware that your request may not be approved.<br><br>${suggestionLine}`;
 };
 
 window.togglePartialMCNotice = function(){
@@ -2135,9 +2136,15 @@ window.submitLeave = async function() {
 
   const badFull = !from || !to || from > to;
   const badPartial = kind === 'partial_day' && (!from || !partialStart || !partialEnd || partialStart >= partialEnd);
+  const badNotes = !notes;
 
-  if (badFull || badPartial) {
-    if (errEl) errEl.style.display = 'block';
+  if (badFull || badPartial || badNotes) {
+    if (errEl) {
+      errEl.textContent = badNotes && !badFull && !badPartial
+        ? '⚠ Please enter a reason for this leave request.'
+        : '⚠ Please enter valid leave details.';
+      errEl.style.display = 'block';
+    }
     return;
   }
 
@@ -2285,8 +2292,8 @@ window.openEditLeaveRequest = function(id) {
         <div class="input-wrap"><label>To</label><input class="input" id="lv-edit-to" type="date" value="${esc(lr.to || '')}"></div>
 
         <div class="input-wrap full-span">
-          <label>Notes (optional)</label>
-          <textarea class="textarea" id="lv-edit-n" placeholder="Any additional context.">${esc(lr.notes || '')}</textarea>
+          <label>Notes / Reason</label>
+          <textarea class="textarea" id="lv-edit-n" placeholder="Please provide a reason for this leave request.">${esc(lr.notes || '')}</textarea>
         </div>
 
         <div id="lv-edit-err" style="display:none;color:#A32D2D;font-size:.82rem" class="full-span">
@@ -2312,8 +2319,13 @@ window.saveEditedLeaveRequest = async function(id) {
   const errEl = qs('#lv-edit-err');
   const btn = qs('#lv-edit-submit');
 
-  if (!from || !to || from > to) {
-    if (errEl) errEl.style.display = 'block';
+  if (!from || !to || from > to || !notes) {
+    if (errEl) {
+      errEl.textContent = (!notes && from && to && from <= to)
+        ? '⚠ Please enter a reason for this leave request.'
+        : '⚠ Please enter valid from and to dates.';
+      errEl.style.display = 'block';
+    }
     return;
   }
 

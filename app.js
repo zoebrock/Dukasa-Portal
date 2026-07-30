@@ -856,6 +856,17 @@ const normalShifts = shifts.filter(s =>
   const leaves   = getList('leaveRequests').filter(l=>isMyEmpId_(l.empId));
   const medCerts = getList('medCerts').filter(m=>isMyEmpId_(m.empId));
 
+  // ── OT REQUESTS AWAITING MY RESPONSE ────────────────────────
+  const pendingOT = getList('otRequests')
+    .filter(o=>isMyEmpId_(o.empId))
+    .filter(o=>
+      o.requestedBy==='manager' &&
+      o.availConfirmed!==true &&
+      o.approved!==true &&
+      o.approved!==false
+    )
+    .sort((a,b)=>(a.date||"").localeCompare(b.date||""));
+
 const outstandingMC = sick.find(s =>
   !medCerts.some(mc =>
     mc.sickId === s.id ||
@@ -1129,6 +1140,29 @@ const netHrs = shiftHrs(s);
       }).join('')}
     </div>` : '';
 
+  const pendingOTSection = pendingOT.length ? `
+    <div class="section-label" style="display:flex;align-items:center;gap:6px">
+      <span>⏰ Overtime awaiting your response</span>
+      <span style="font-size:10px;background:#534AB7;color:#fff;border-radius:10px;padding:1px 7px;font-weight:700">${pendingOT.length}</span>
+    </div>
+    <div class="info-grid" style="margin-bottom:4px">
+      ${pendingOT.map(o=>`
+        <div class="card list-card" style="align-items:flex-start">
+          <div style="flex:1;min-width:0">
+            <div class="list-title">${esc(FDS(o.date))} · ${esc(o.start||'')} – ${esc(o.end||'')}</div>
+            ${o.reason?`<div class="list-copy">${esc(o.reason)}</div>`:''}
+          </div>
+          <div style="display:flex;flex-direction:column;gap:7px;align-items:flex-end">
+            <span class="badge badge-amber">Awaiting your response</span>
+            <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">
+              <button class="btn btn-primary btn-sm" type="button" onclick="respondManagerOT('${o.id}', true)">Approve</button>
+              <button class="btn btn-secondary btn-sm" type="button" onclick="respondManagerOT('${o.id}', false)">Decline</button>
+            </div>
+          </div>
+        </div>
+      `).join('')}
+    </div>` : '';
+
   const upcoming = shifts.filter(s=>s.date>td).sort((a,b)=>(a.date||"").localeCompare(b.date||"")).slice(0,5);
   const now      = new Date();
 
@@ -1144,6 +1178,7 @@ const netHrs = shiftHrs(s);
       </div>
     </div>
 ${todayCard}
+${pendingOTSection}
 ${outstandingMC ? `
   <div class="card card-alert" style="margin:14px 0;padding:18px;border:1px solid rgba(163,45,45,.25);background:#FCEBEB;border-radius:18px">
     <div style="font-weight:700;color:#A32D2D;margin-bottom:6px">Medical certificate required</div>

@@ -3712,10 +3712,37 @@ async function smsPost_(toPhone, message){
 // state.empIds holds every id ever associated with this person's email). Chat
 // membership must be checked against ALL of those ids, not just the current one,
 // or a chat created while an older id was live becomes permanently invisible.
+// If this staff login is the designated manager account (Settings > Chat
+// notifications > Your Staff Portal email, in the Manager Portal), also pull
+// in every chat "admin" belongs to — DMs from other staff and any groups —
+// so Zoe can see and reply to her admin chats from either app.
+// The settings row (and its managerEmail) is fetched once per page load and
+// cached, but the isManagerStaff comparison itself is recomputed against
+// whoever is CURRENTLY logged in every time — this is a shared device app,
+// so a non-manager logging in after Zoe (or vice versa) must not inherit a
+// stale boolean from an earlier login in the same browser session.
+let _cachedManagerEmail = null;
+async function loadChatSettings_(){
+  if(_cachedManagerEmail === null){
+    try{
+      const { data, error } = await supabase.from('settings').select('*').eq('id','settings').maybeSingle();
+      _cachedManagerEmail = (!error && data && data.value && data.value.managerEmail)
+        ? String(data.value.managerEmail).trim().toLowerCase()
+        : '';
+    }catch(e){
+      console.warn('loadChatSettings_ failed:', e.message);
+      _cachedManagerEmail = '';
+    }
+  }
+  const myEmail = String(state.emp?.email||'').trim().toLowerCase();
+  state.isManagerStaff = !!(_cachedManagerEmail && myEmail && _cachedManagerEmail===myEmail);
+}
+
 async function fetchMyChats_(){
   const myIds = (state.empIds && state.empIds.length) ? state.empIds : [state.emp.id];
+  const idsToQuery = state.isManagerStaff ? [...myIds,'admin'] : myIds;
   const crewPromise = supabase.from('chats').select('*').eq('type','crew');
-  const minePromises = myIds.map(id => supabase.from('chats').select('*').neq('type','crew').contains('member_ids',[id]));
+  const minePromises = idsToQuery.map(id => supabase.from('chats').select('*').neq('type','crew').contains('member_ids',[id]));
   const [{data:crew,error:e1}, ...mineResults] = await Promise.all([crewPromise, ...minePromises]);
   if(e1) console.warn('chats(crew) load failed', e1.message);
   const mineMap = new Map();
@@ -3729,7 +3756,7 @@ async function fetchMyChats_(){
 }
 
 async function fetchMyReads_(){
-  const myIds = (state.empIds && state.empIds.length) ? state.empIds : [state.emp.id];
+  const myIds = myIds_();
   const { data, error } = await supabase.from('chat_reads').select('*').in('reader_id', myIds);
   if(error){ console.warn('chat_reads load failed', error.message); return {}; }
   const map = {};
@@ -3742,6 +3769,7 @@ async function fetchMyReads_(){
 }
 
 async function loadChatData_(){
+  await loadChatSettings_();
   const [chats, reads] = await Promise.all([fetchMyChats_(), fetchMyReads_()]);
   chatState.chats = chats;
   chatState.reads = reads;
@@ -3781,9 +3809,14 @@ async function fetchChatMessages_(chatId, limit=200){
 }
 
 async function markChatRead_(chatId){
+  // For one of Zoe's admin chats, mark it read as "admin" — the same reader
+  // id the Manager Portal uses — so reading it in either app clears the
+  // unread status in both, instead of each app tracking it separately.
+  const chat = chatState.chats.find(c=>c.id===chatId);
+  const readerId = (state.isManagerStaff && chat && (chat.member_ids||[]).includes('admin')) ? 'admin' : state.emp.id;
   const { error } = await supabase.from('chat_reads').upsert({
     chat_id: chatId,
-    reader_id: state.emp.id,
+    reader_id: readerId,
     last_read_at: new Date().toISOString()
   }, { onConflict: 'chat_id,reader_id' });
   if(error) console.warn('markChatRead_ failed', error.message);
@@ -3803,7 +3836,9 @@ function chatMembersForMention_(chat){
 // crew or group chat. DMs are notified from whichever side sends the message; staff
 // messaging the admin doesn't SMS the admin — the manager portal is checked in-app.
 function myIds_(){
-  return (state.empIds && state.empIds.length) ? state.empIds.map(String) : [String(state.emp.id)];
+  const ids = (state.empIds && state.empIds.length) ? state.empIds.map(String) : [String(state.emp.id)];
+  if(state.isManagerStaff) ids.push('admin');
+  return ids;
 }
 
 // Fixed SMS copy for staff, regardless of whether it's a DM or an @mention.
@@ -3855,8 +3890,16 @@ async function notifyManagerOfChatMessage_(chat, msg){
 async function sendChatMessage_(chat, body, mentions){
   const trimmed = (body||'').trim();
   if(!trimmed) return;
-  const myId = state.emp.id;
-  const myName = `${state.emp.first||''} ${state.emp.last||''}`.trim() || 'Staff';
+
+  // If this is Zoe's staff login and the chat is one of her admin chats
+  // (a DM another staff member has with the manager, or a group admin is
+  // in), send as "admin" so the recipient sees the same "Zoe - Dukasa"
+  // sender they'd see replying from the Manager Portal — not her personal
+  // staff identity, which would be a confusing second "sender" in the
+  // same conversation.
+  const sendAsAdmin = state.isManagerStaff && (chat.member_ids||[]).includes('admin');
+  const myId = sendAsAdmin ? 'admin' : state.emp.id;
+  const myName = sendAsAdmin ? (state.emp.first || 'Zoe') : (`${state.emp.first||''} ${state.emp.last||''}`.trim() || 'Staff');
   const now = new Date().toISOString();
   const msg = {
     id: 'msg' + Date.now() + Math.random().toString(36).slice(2,7),
@@ -3878,7 +3921,10 @@ async function sendChatMessage_(chat, body, mentions){
 
   await markChatRead_(chat.id);
   notifyChatMessage_(chat, msg).catch(err => console.warn('Chat SMS notify failed:', err.message));
-  notifyManagerOfChatMessage_(chat, msg).catch(err => console.warn('Manager chat SMS notify failed:', err.message));
+  // Never SMS the manager about her own message, whichever identity she sent it as.
+  if(!state.isManagerStaff){
+    notifyManagerOfChatMessage_(chat, msg).catch(err => console.warn('Manager chat SMS notify failed:', err.message));
+  }
 }
 
 function chatIsUnread_(c){
@@ -3903,13 +3949,41 @@ function updateChatNavBadge_(){
 
 function chatDisplayName_(c){
   if(c.type === 'crew') return 'Dukasa Crew';
-  if(c.type === 'dm') return 'Zoe - Dukasa';
+  if(c.type === 'dm'){
+    // Zoe viewing one of her admin chats from her staff login — show the
+    // other staff member's name, not "Zoe - Dukasa" (that would be her
+    // referring to herself).
+    if(state.isManagerStaff && (c.member_ids||[]).includes('admin')){
+      const otherId = (c.member_ids||[]).map(String).find(id => id!=='admin' && !myIds_().includes(id));
+      const s = getList('staff').find(x=>String(x.id)===String(otherId));
+      if(s) return `${s.first} ${s.last}`;
+    }
+    return 'Zoe - Dukasa';
+  }
   return c.name || 'Group chat';
 }
 function chatIcon_(c){
   if(c.type === 'crew') return '👥';
   if(c.type === 'dm') return '💬';
   return '🗂️';
+}
+// Real initials for a DM (not a generic icon), so who you're talking to
+// stays visible in the list AND once the thread is open.
+function chatAvatarHTML_(c,size){
+  size = size || 34;
+  const fs = Math.round(size*0.34);
+  if(c.type === 'dm'){
+    if(state.isManagerStaff && (c.member_ids||[]).includes('admin')){
+      const otherId = (c.member_ids||[]).map(String).find(id => id!=='admin' && !myIds_().includes(id));
+      const s = getList('staff').find(x=>String(x.id)===String(otherId));
+      if(s){
+        const initials = ((s.first[0]||'')+(s.last[0]||'')).toUpperCase();
+        return `<div style="width:${size}px;height:${size}px;border-radius:50%;background:${s.color||'#534AB7'}22;color:${s.color||'#534AB7'};display:flex;align-items:center;justify-content:center;font-size:${fs}px;font-weight:700;flex-shrink:0">${esc(initials)}</div>`;
+      }
+    }
+    return `<div style="width:${size}px;height:${size}px;border-radius:50%;background:#534AB722;color:#534AB7;display:flex;align-items:center;justify-content:center;font-size:${fs}px;font-weight:700;flex-shrink:0">ZD</div>`;
+  }
+  return `<div style="width:${size}px;height:${size}px;border-radius:50%;background:#534AB722;display:flex;align-items:center;justify-content:center;font-size:${Math.round(size*0.5)}px;flex-shrink:0">${chatIcon_(c)}</div>`;
 }
 
 async function renderChat(){
@@ -3936,22 +4010,22 @@ function renderChatList_(){
     <div class="info-grid">
       ${chatState.chats.length ? chatState.chats.map(c => {
         const unread = chatIsUnread_(c);
-        return `<div class="card list-card" style="cursor:pointer" onclick="openChatThread('${c.id}')">
-          <div style="width:34px;height:34px;border-radius:50%;background:#534AB722;display:flex;align-items:center;justify-content:center;font-size:1rem;flex-shrink:0">${chatIcon_(c)}</div>
+        return `<div class="card list-card" style="cursor:pointer;${unread?'background:#F4F2FF;border-color:#534AB7':''}" onclick="openChatThread('${c.id}')">
+          ${chatAvatarHTML_(c,34)}
           <div style="flex:1;min-width:0">
-            <div class="list-title" style="font-size:.95rem">${esc(chatDisplayName_(c))}</div>
-            <div class="list-copy" style="margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(c.last_message_preview || 'No messages yet.')}</div>
+            <div class="list-title" style="font-size:.95rem;font-weight:${unread?800:600}">${esc(chatDisplayName_(c))}</div>
+            <div class="list-copy" style="margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:${unread?'#534AB7':'inherit'};font-weight:${unread?700:400}">${esc(c.last_message_preview || 'No messages yet.')}</div>
           </div>
-          ${unread ? '<span style="width:9px;height:9px;border-radius:50%;background:#534AB7;flex-shrink:0"></span>' : ''}
+          ${unread ? '<span style="font-size:.65rem;font-weight:800;letter-spacing:.04em;color:#fff;background:#D64545;border-radius:10px;padding:3px 8px;flex-shrink:0">NEW</span>' : ''}
         </div>`;
       }).join('') : ''}
-      ${chatState.chats.some(c=>c.type==='dm') ? '' : `<div class="card list-card" style="cursor:pointer;border:1px dashed var(--border)" onclick="openChatThread('dm-mine')">
+      ${(!state.isManagerStaff && !chatState.chats.some(c=>c.type==='dm')) ? `<div class="card list-card" style="cursor:pointer;border:1px dashed var(--border)" onclick="openChatThread('dm-mine')">
         <div style="width:34px;height:34px;border-radius:50%;background:#534AB722;display:flex;align-items:center;justify-content:center;font-size:1rem;flex-shrink:0">💬</div>
         <div style="flex:1;min-width:0">
           <div class="list-title" style="font-size:.95rem">Message your manager</div>
           <div class="list-copy" style="margin-top:2px">Start a direct message with Zoe - Dukasa.</div>
         </div>
-      </div>`}
+      </div>` : ''}
     </div>
   `;
 }
@@ -3990,7 +4064,10 @@ async function renderChatThread_(){
   el.innerHTML = `
     <div class="page-header">
       <button class="btn btn-secondary btn-sm" type="button" onclick="closeChatThread()">‹ Back</button>
-      <div><h1 class="page-title" style="font-size:1.3rem">${esc(chatDisplayName_(chat))}</h1></div>
+      <div style="display:flex;align-items:center;gap:10px;min-width:0">
+        ${chatAvatarHTML_(chat,30)}
+        <h1 class="page-title" style="font-size:1.3rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(chatDisplayName_(chat))}</h1>
+      </div>
     </div>
     <div id="chat-messages" class="card" style="max-height:55vh;overflow-y:auto;display:flex;flex-direction:column;gap:10px;margin-bottom:12px">
       ${messages.length ? messages.map(chatMessageBubble_).join('') : '<div class="helper-note">No messages yet — say hi!</div>'}

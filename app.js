@@ -3965,7 +3965,7 @@ function chatDisplayName_(c){
 function chatIcon_(c){
   if(c.type === 'crew') return '👥';
   if(c.type === 'dm') return '💬';
-  return '🗂️';
+  return c.icon || '🗂️';
 }
 // Real initials for a DM (not a generic icon), so who you're talking to
 // stays visible in the list AND once the thread is open.

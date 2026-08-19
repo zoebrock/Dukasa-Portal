@@ -2725,9 +2725,17 @@ function renderOT() {
 async function applyApprovedOTToShift(ot) {
   const shifts = getList('shifts');
 
+  // Normalise IDs to strings before comparison — Supabase can return numeric IDs
+  // while the local cache may have them as strings, causing bare === to miss the
+  // match and incorrectly fall through to creating a phantom standalone OT shift
+  // that never merges into (and therefore never updates the start/end time of)
+  // the staff member's actual rostered shift.
+  const otEmpId = String(ot.empId ?? '');
+  const otDate = String(ot.date ?? '');
+
   const shiftIdx = shifts.findIndex(s =>
-    s.empId === ot.empId &&
-    s.date === ot.date &&
+    String(s.empId ?? '') === otEmpId &&
+    String(s.date ?? '') === otDate &&
     !s.isOT
   );
 
@@ -2757,6 +2765,8 @@ async function applyApprovedOTToShift(ot) {
       ...s,
       start: newStart,
       end: newEnd,
+      published: true,
+      status: 'published',
       otOriginalStart: origStart,
       otOriginalEnd: origEnd,
       otAnnotations: annotations

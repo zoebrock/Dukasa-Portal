@@ -3897,6 +3897,32 @@ async function notifyManagerOfChatMessage_(chat, msg){
   } catch(e){ console.warn('Manager chat SMS notify failed:', e.message); }
 }
 
+// Manager Portal encodes a queried leave request as a small machine-readable
+// reference at the start of the chat message body (no schema change needed
+// on chat_messages) — decode it here so it renders as a card, not raw JSON.
+const LEAVE_REF_PREFIX = '[[LEAVE_REF:';
+const LEAVE_REF_SUFFIX = ']]';
+
+function decodeLeaveRef(body){
+  if(!body || !body.startsWith(LEAVE_REF_PREFIX)) return null;
+  const end = body.indexOf(LEAVE_REF_SUFFIX);
+  if(end < 0) return null;
+  try{
+    const ref = JSON.parse(body.slice(LEAVE_REF_PREFIX.length, end));
+    const rest = body.slice(end + LEAVE_REF_SUFFIX.length).replace(/^\n+/, '');
+    return { ref, message: rest };
+  } catch(e){ return null; }
+}
+
+function leaveRefCardHTML(ref){
+  const bc = {pending:'#8a6d00',approved:'#0a6b3f',declined:'#a3231c'}[ref.status] || '#8a6d00';
+  const bg = {pending:'#fff6e0',approved:'#e4f7ee',declined:'#fdeceb'}[ref.status] || '#fff6e0';
+  return `<div style="border:1px solid rgba(0,0,0,.08);border-radius:10px;padding:8px 10px;margin-bottom:5px;background:#fff;color:#181816">
+    <div style="font-size:.68rem;font-weight:700;color:#534AB7;text-transform:uppercase;letter-spacing:.03em;margin-bottom:2px">📋 Leave request</div>
+    <div style="font-size:.82rem">${esc(ref.type||'Leave')} <span style="color:#68685f">${FDS(ref.from)} – ${FDS(ref.to)}</span> <span style="font-size:.68rem;font-weight:700;color:${bc};background:${bg};border-radius:8px;padding:2px 7px;margin-left:2px">${esc(ref.status||'')}</span></div>
+  </div>`;
+}
+
 async function sendChatMessage_(chat, body, mentions){
   const trimmed = (body||'').trim();
   if(!trimmed) return;
@@ -3923,9 +3949,14 @@ async function sendChatMessage_(chat, body, mentions){
   const { error } = await supabase.from('chat_messages').insert(msg);
   if(error) throw error;
 
+  const decodedForPreview = decodeLeaveRef(trimmed);
+  const preview = decodedForPreview
+    ? ('📋 Leave request query' + (decodedForPreview.message ? ': ' + decodedForPreview.message : '')).slice(0,140)
+    : trimmed.slice(0,140);
+
   await supabase.from('chats').update({
     updated_at: now,
-    last_message_preview: trimmed.slice(0,140),
+    last_message_preview: preview,
     last_sender_id: myId
   }).eq('id', chat.id);
 
@@ -4043,9 +4074,13 @@ function renderChatList_(){
 function chatMessageBubble_(m){
   const mine = myIds_().includes(String(m.sender_id));
   const time = new Date(m.created_at).toLocaleTimeString('en-AU',{hour:'2-digit',minute:'2-digit'});
+  const decoded = decodeLeaveRef(m.body);
+  const bodyHTML = decoded
+    ? leaveRefCardHTML(decoded.ref) + (decoded.message ? `<div>${esc(decoded.message)}</div>` : '')
+    : esc(m.body);
   return `<div style="align-self:${mine?'flex-end':'flex-start'};max-width:80%">
     ${!mine ? `<div style="font-size:.72rem;font-weight:700;color:#534AB7;margin-bottom:2px">${esc(m.sender_name)}</div>` : ''}
-    <div style="background:${mine?'#534AB7':'#f4f2ff'};color:${mine?'#fff':'#181816'};padding:9px 12px;border-radius:14px;${mine?'border-bottom-right-radius:4px':'border-bottom-left-radius:4px'};font-size:.88rem;white-space:pre-wrap;word-break:break-word">${esc(m.body)}</div>
+    <div style="background:${mine?'#534AB7':'#f4f2ff'};color:${mine?'#fff':'#181816'};padding:9px 12px;border-radius:14px;${mine?'border-bottom-right-radius:4px':'border-bottom-left-radius:4px'};font-size:.88rem;white-space:pre-wrap;word-break:break-word">${bodyHTML}</div>
     <div style="font-size:.68rem;color:#98988f;margin-top:2px;text-align:${mine?'right':'left'}">${time}</div>
   </div>`;
 }

@@ -3732,6 +3732,7 @@ async function smsPost_(toPhone, message){
 // so a non-manager logging in after Zoe (or vice versa) must not inherit a
 // stale boolean from an earlier login in the same browser session.
 let _cachedManagerEmail = null;
+let _cachedSmsTemplates = null;
 async function loadChatSettings_(){
   if(_cachedManagerEmail === null){
     try{
@@ -3739,9 +3740,13 @@ async function loadChatSettings_(){
       _cachedManagerEmail = (!error && data && data.value && data.value.managerEmail)
         ? String(data.value.managerEmail).trim().toLowerCase()
         : '';
+      // The Manager Portal's Settings > Message templates editor stores overrides
+      // here too — reuse the same fetch rather than a second round trip.
+      _cachedSmsTemplates = (!error && data && data.value && data.value.smsTemplates) || {};
     }catch(e){
       console.warn('loadChatSettings_ failed:', e.message);
       _cachedManagerEmail = '';
+      _cachedSmsTemplates = {};
     }
   }
   const myEmail = String(state.emp?.email||'').trim().toLowerCase();
@@ -3851,9 +3856,20 @@ function myIds_(){
   return ids;
 }
 
-// Fixed SMS copy for staff, regardless of whether it's a DM or an @mention.
+// Message wording is editable in the Manager Portal (Settings > Message
+// templates, stored in settings.smsTemplates) — these are just the factory
+// defaults, used whenever no override has been saved. Must match the
+// DEFAULT_SMS_TEMPLATES keys/wording in the Manager Portal's index.html.
+const DEFAULT_CHAT_SMS_TEMPLATE_ = `Hey {{first_name}}! You have a new Dukasa message. Please make sure you acknowledge and reply ASAP. {{link}}`;
+const DEFAULT_CHAT_MANAGER_SMS_TEMPLATE_ = `Hey {{manager_first_name}}! New message from {{sender_name}} in {{chat_label}} — Dukasa Manager Portal.`;
+
+function renderSmsTemplatePortal_(str, tokens){
+  return String(str||'').replace(/\{\{(\w+)\}\}/g, (m,key) => (tokens[key]!==undefined && tokens[key]!==null) ? tokens[key] : '');
+}
+
 function chatSmsText_(firstName){
-  return `Hey ${firstName}! You have a new Dukasa message. Please make sure you acknowledge and reply ASAP. ${STAFF_PORTAL_URL_}`;
+  const tmpl = (_cachedSmsTemplates && _cachedSmsTemplates.chat_message) || DEFAULT_CHAT_SMS_TEMPLATE_;
+  return renderSmsTemplatePortal_(tmpl, { first_name: firstName, link: STAFF_PORTAL_URL_ });
 }
 
 async function notifyChatMessage_(chat, msg){
@@ -3892,7 +3908,8 @@ async function notifyManagerOfChatMessage_(chat, msg){
     const phone = data.value.managerNotifyPhone;
     if(!phone) return;
     const chatLabel = chat.type === 'crew' ? 'Dukasa Crew' : chat.type === 'dm' ? 'a direct message' : (chat.name || 'a group chat');
-    const text = `Hey Zoe! New message from ${msg.sender_name} in ${chatLabel} — Dukasa Manager Portal.`;
+    const tmpl = (data.value.smsTemplates && data.value.smsTemplates.chat_manager_notify) || DEFAULT_CHAT_MANAGER_SMS_TEMPLATE_;
+    const text = renderSmsTemplatePortal_(tmpl, { manager_first_name: 'Zoe', sender_name: msg.sender_name, chat_label: chatLabel });
     await smsPost_(phone, text);
   } catch(e){ console.warn('Manager chat SMS notify failed:', e.message); }
 }

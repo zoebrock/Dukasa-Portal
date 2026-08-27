@@ -102,7 +102,8 @@ async function getAllData() {
     otRequests,
     sickDays,
     medCerts,
-    announcements
+    announcements,
+    meetingNotes
   ] = await Promise.all([
     fetchAllRows_('staff', query =>
       query.order('id', { ascending: true })
@@ -142,6 +143,10 @@ async function getAllData() {
 
     fetchAllRows_('announcements', query =>
       query.order('id', { ascending: true })
+    ),
+
+    fetchAllRows_('meeting_notes', query =>
+      query.order('meeting_date', { ascending: false })
     )
   ]);
 
@@ -159,7 +164,8 @@ async function getAllData() {
     otRequests,
     sickDays,
     medCerts,
-    announcements
+    announcements,
+    meetingNotes
   };
 
   Object.entries(optionalResults).forEach(([name, result]) => {
@@ -247,6 +253,15 @@ async function getAllData() {
     notifyStaff: a.notifyStaff || a.notify_staff || false
   }));
 
+  const mappedMeetingNotes = (meetingNotes.data || []).map(m => ({
+    ...m,
+    meetingDate: m.meeting_date,
+    fileName: m.file_name,
+    fileUrl: m.file_url,
+    filePath: m.file_path,
+    uploadedBy: m.uploaded_by
+  }));
+
   console.log('Staff Portal data loaded:', {
     staff: staff.data?.length || 0,
     shifts: mappedShifts.length,
@@ -273,7 +288,8 @@ async function getAllData() {
       rx3_otRequests: JSON.stringify(mappedOTRequests),
       rx3_sickDays: JSON.stringify(mappedSickDays),
       rx3_medCerts: JSON.stringify(mappedMedCerts),
-      rx3_announcements: JSON.stringify(mappedAnnouncements)
+      rx3_announcements: JSON.stringify(mappedAnnouncements),
+      rx3_meetingNotes: JSON.stringify(mappedMeetingNotes)
     }
   };
 }
@@ -1099,6 +1115,29 @@ if (staffIds.length > 0) {
       }).join('')}
     </div>` : '';
 
+  // ── TEAM MEETINGS ─────────────────────────────────────────────
+  const allMeetingNotes = getList('meetingNotes')
+    .slice().sort((a,b)=>(b.meetingDate||b.meeting_date||'').localeCompare(a.meetingDate||a.meeting_date||''));
+
+  const meetingSection = allMeetingNotes.length ? `
+    <div class="section-label" style="display:flex;align-items:center;gap:6px">
+      <span>📋 Team Meetings</span>
+      <span style="font-size:10px;background:#534AB7;color:#fff;border-radius:10px;padding:1px 7px;font-weight:700">${allMeetingNotes.length}</span>
+    </div>
+    <div class="info-grid" style="margin-bottom:4px">
+      ${allMeetingNotes.slice(0,3).map(m=>{
+        const mDate = m.meetingDate || m.meeting_date;
+        const dateLabel = mDate ? FDS(mDate) : '';
+        return `<div class="card list-card" style="cursor:pointer;border-left:3px solid #534AB7;padding-left:12px" onclick="openMeetingNotePopup('${m.id}')">
+          <div style="flex:1;min-width:0">
+            <div class="list-title" style="font-size:.95rem">${esc(m.title)}</div>
+            <div class="list-copy" style="margin-top:3px;font-size:.8rem">${dateLabel?`📅 ${esc(dateLabel)}`:''}${m.uploadedBy?` · ${esc(m.uploadedBy)}`:''}</div>
+          </div>
+          <div style="font-size:1.2rem;color:#534AB7;flex-shrink:0">›</div>
+        </div>`;
+      }).join('')}
+    </div>` : '';
+
   const week = Array.from({length:7},(_,i)=>{
     const ds=addDays(ws,i); const d=new Date(ds+'T00:00:00');
     return {dow:d.toLocaleDateString('en-AU',{weekday:'short'}),num:d.getDate(),ds,
@@ -1204,6 +1243,7 @@ ${outstandingMC ? `
 ` : ''}
 ${breakBanner}
 ${annSection}
+    ${meetingSection}
     ${teamSection}
     <div class="section-label">This week at a glance</div>
     <div class="week-strip">
@@ -1310,6 +1350,60 @@ window.openAnnPopup = function(annId) {
     </div>`;
 
   // Tap backdrop to dismiss
+  popup.addEventListener('click', e=>{ if(e.target===popup) popup.remove(); });
+  document.body.appendChild(popup);
+};
+
+window.openMeetingNotePopup = function(noteId) {
+  const m = getList('meetingNotes').find(x => String(x.id) === String(noteId));
+  if (!m) return;
+  const existing = qs('#meeting-note-popup');
+  if (existing) existing.remove();
+
+  const mDate = m.meetingDate || m.meeting_date;
+  const dateFull = mDate ? new Date(mDate+'T00:00:00').toLocaleDateString('en-AU',{weekday:'long',day:'numeric',month:'long',year:'numeric'}) : '';
+  const fileUrl = m.fileUrl || m.file_url;
+
+  const popup = document.createElement('div');
+  popup.id = 'meeting-note-popup';
+  popup.style.cssText = 'position:fixed;inset:0;z-index:500;display:flex;align-items:flex-end;justify-content:center;background:rgba(0,0,0,.45);backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);animation:fadeIn .2s ease';
+  popup.innerHTML = `
+    <div style="width:100%;max-width:520px;background:#fff;border-radius:22px 22px 0 0;padding:0 0 calc(env(safe-area-inset-bottom,0px) + 8px);animation:slideUp .28s cubic-bezier(.22,1,.36,1);overflow:hidden">
+      <div style="background:#534AB7;padding:20px 22px 18px">
+        <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px">
+          <div style="flex:1">
+            <div style="font-size:.7rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#AFA9EC;margin-bottom:5px">📋 Team Meeting</div>
+            <div style="font-size:1.25rem;font-weight:700;color:#fff;line-height:1.25">${esc(m.title)}</div>
+          </div>
+          <button onclick="document.getElementById('meeting-note-popup').remove()" style="background:rgba(255,255,255,.15);border:none;color:#fff;border-radius:50%;width:32px;height:32px;font-size:18px;cursor:pointer;flex-shrink:0;display:flex;align-items:center;justify-content:center;line-height:1">×</button>
+        </div>
+      </div>
+      <div style="padding:18px 22px">
+        <div style="display:flex;flex-direction:column;gap:10px">
+          ${dateFull?`<div style="display:flex;align-items:center;gap:10px">
+            <span style="font-size:1.2rem">📅</span>
+            <div>
+              <div style="font-size:.7rem;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:#98988f">Meeting date</div>
+              <div style="font-size:.95rem;font-weight:600;color:#181816;margin-top:1px">${esc(dateFull)}</div>
+            </div>
+          </div>`:''}
+          ${m.uploadedBy?`<div style="display:flex;align-items:center;gap:10px">
+            <span style="font-size:1.2rem">👤</span>
+            <div>
+              <div style="font-size:.7rem;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:#98988f">Uploaded by</div>
+              <div style="font-size:.9rem;color:#181816;margin-top:1px">${esc(m.uploadedBy)}</div>
+            </div>
+          </div>`:''}
+          ${m.summary?`<div style="border-top:1px solid #e8e7e1;padding-top:12px;margin-top:2px">
+            <div style="font-size:.7rem;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:#98988f;margin-bottom:6px">Summary</div>
+            <div style="font-size:.9rem;color:#3a3a35;line-height:1.55;white-space:pre-wrap">${esc(m.summary)}</div>
+          </div>`:''}
+        </div>
+        ${fileUrl?`<a href="${fileUrl}" target="_blank" rel="noopener" class="btn btn-primary" style="width:100%;margin-top:18px;display:block;text-align:center;text-decoration:none">📄 View PDF</a>`:''}
+        <button onclick="document.getElementById('meeting-note-popup').remove()" class="btn btn-secondary" style="width:100%;margin-top:10px">Close</button>
+      </div>
+    </div>`;
+
   popup.addEventListener('click', e=>{ if(e.target===popup) popup.remove(); });
   document.body.appendChild(popup);
 };

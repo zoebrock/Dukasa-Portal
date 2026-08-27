@@ -1119,13 +1119,13 @@ if (staffIds.length > 0) {
   const allMeetingNotes = getList('meetingNotes')
     .slice().sort((a,b)=>(b.meetingDate||b.meeting_date||'').localeCompare(a.meetingDate||a.meeting_date||''));
 
-  const meetingSection = allMeetingNotes.length ? `
+  const meetingSection = `
     <div class="section-label" style="display:flex;align-items:center;gap:6px">
       <span>📋 Team Meetings</span>
-      <span style="font-size:10px;background:#534AB7;color:#fff;border-radius:10px;padding:1px 7px;font-weight:700">${allMeetingNotes.length}</span>
+      ${allMeetingNotes.length ? `<span style="font-size:10px;background:#534AB7;color:#fff;border-radius:10px;padding:1px 7px;font-weight:700">${allMeetingNotes.length}</span>` : ''}
     </div>
     <div class="info-grid" style="margin-bottom:4px">
-      ${allMeetingNotes.slice(0,3).map(m=>{
+      ${allMeetingNotes.length ? allMeetingNotes.slice(0,3).map(m=>{
         const mDate = m.meetingDate || m.meeting_date;
         const dateLabel = mDate ? FDS(mDate) : '';
         return `<div class="card list-card" style="cursor:pointer;border-left:3px solid #534AB7;padding-left:12px" onclick="openMeetingNotePopup('${m.id}')">
@@ -1135,8 +1135,8 @@ if (staffIds.length > 0) {
           </div>
           <div style="font-size:1.2rem;color:#534AB7;flex-shrink:0">›</div>
         </div>`;
-      }).join('')}
-    </div>` : '';
+      }).join('') : `<div class="helper-note">No meeting notes have been posted yet.</div>`}
+    </div>`;
 
   const week = Array.from({length:7},(_,i)=>{
     const ds=addDays(ws,i); const d=new Date(ds+'T00:00:00');

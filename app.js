@@ -796,6 +796,7 @@ function buildApp() {
         <section id="view-ot"      class="view"></section>
         <section id="view-chat"    class="view"></section>
         <section id="view-hours"   class="view"></section>
+        <section id="view-teammeetings" class="view"></section>
         <section id="view-profile" class="view"></section>
       </main>
       <nav class="tabbar">
@@ -804,7 +805,7 @@ function buildApp() {
         <button class="tab"        data-view="leave">   <span class="tab-icon">🌈</span><span class="tab-label">Leave</span></button>
         <button class="tab"        data-view="ot">      <span class="tab-icon">⏰</span><span class="tab-label">OT</span></button>
         <button class="tab"        data-view="chat">    <span class="tab-icon">💬</span><span class="tab-label">Chat</span><span id="chat-nav-badge" style="display:none;position:absolute;top:2px;right:14px;min-width:15px;height:15px;border-radius:8px;background:#A32D2D;color:#fff;font-size:.6rem;font-weight:700;align-items:center;justify-content:center;padding:0 3px">0</span></button>
-        <button class="tab"        data-view="hours">   <span class="tab-icon">🕘</span><span class="tab-label">Hours</span></button>
+        <button class="tab"        data-view="teammeetings"> <span class="tab-icon">📋</span><span class="tab-label">Meetings</span></button>
         <button class="tab"        data-view="profile"> <span class="tab-icon">👤</span><span class="tab-label">Profile</span></button>
       </nav>
     </div>`;
@@ -849,7 +850,7 @@ function anim(root=document) {
 }
 
 function renderAll() {
-  renderHome(); renderRoster(); renderLeave(); renderOT(); renderHours(); renderProfile();
+  renderHome(); renderRoster(); renderLeave(); renderOT(); renderHours(); renderTeamMeetingsPage(); renderProfile();
   anim(qs('#view-'+state.currentView));
 }
 
@@ -1123,6 +1124,7 @@ if (staffIds.length > 0) {
     <div class="section-label" style="display:flex;align-items:center;gap:6px">
       <span>📋 Team Meetings</span>
       ${allMeetingNotes.length ? `<span style="font-size:10px;background:#534AB7;color:#fff;border-radius:10px;padding:1px 7px;font-weight:700">${allMeetingNotes.length}</span>` : ''}
+      <span style="margin-left:auto;font-size:.78rem;font-weight:600;color:#534AB7;cursor:pointer" onclick="window.nav('teammeetings')">View all ›</span>
     </div>
     <div class="info-grid" style="margin-bottom:4px">
       ${allMeetingNotes.length ? allMeetingNotes.slice(0,3).map(m=>{
@@ -3293,6 +3295,7 @@ function renderHours() {
   const rec  = shifts.filter(s=>s.date<=td).sort((a,b)=>(b.date||"").localeCompare(a.date||"")).slice(0,8);
 
   qs('#view-hours').innerHTML=`
+    <button class="btn btn-secondary btn-sm" style="margin-bottom:14px" onclick="window.nav('profile')">‹ Back to Profile</button>
     <div class="page-header stack">
       <h1 class="page-title">Hours</h1>
       <div class="page-subtitle">A summary of your rostered hours.</div>
@@ -3318,6 +3321,35 @@ function renderHours() {
     </div>`;
 }
 
+// ── TEAM MEETINGS (dedicated page) ──────────────────────────────
+function renderTeamMeetingsPage() {
+  const notes = getList('meetingNotes')
+    .slice().sort((a,b)=>(b.meetingDate||b.meeting_date||'').localeCompare(a.meetingDate||a.meeting_date||''));
+
+  qs('#view-teammeetings').innerHTML = `
+    <div class="page-header stack">
+      <h1 class="page-title">Team Meetings</h1>
+      <div class="page-subtitle">Notes and recordings from team meetings.</div>
+    </div>
+    <div class="info-grid">
+      ${notes.length ? notes.map(m=>{
+        const mDate = m.meetingDate || m.meeting_date;
+        const dateLabel = mDate ? FDS(mDate) : '';
+        return `<div class="card list-card" style="cursor:pointer;border-left:3px solid #534AB7;padding-left:12px" onclick="openMeetingNotePopup('${m.id}')">
+          <div style="flex:1;min-width:0">
+            <div class="list-title" style="font-size:.95rem">${esc(m.title)}</div>
+            <div class="list-copy" style="margin-top:3px;font-size:.8rem">${dateLabel?`📅 ${esc(dateLabel)}`:''}${m.uploadedBy?` · ${esc(m.uploadedBy)}`:''}</div>
+            ${m.summary?`<div class="list-copy" style="margin-top:6px;font-size:.82rem;color:#3a3a35;line-height:1.45">${esc(m.summary.length>140?m.summary.slice(0,140)+'…':m.summary)}</div>`:''}
+          </div>
+          <div style="font-size:1.2rem;color:#534AB7;flex-shrink:0">›</div>
+        </div>`;
+      }).join('') : `<div class="card" style="text-align:center;padding:34px 20px;color:#707067">
+        <div style="font-size:28px;margin-bottom:8px">📋</div>
+        <p>No meeting notes have been posted yet.</p>
+      </div>`}
+    </div>`;
+}
+
 // ── PROFILE ────────────────────────────────────────────────────
 function renderProfile() {
   const emp = state.emp;
@@ -3330,6 +3362,14 @@ function renderProfile() {
     <div class="card" style="margin-bottom:18px">
       <div class="list-title" style="font-size:1.18rem">${esc(emp.first)} ${esc(emp.last)}</div>
       <div class="list-copy">${esc(emp.role)}</div>
+    </div>
+
+    <div class="card list-card" style="cursor:pointer;margin-bottom:18px" onclick="window.nav('hours')">
+      <div style="flex:1">
+        <div class="list-title" style="font-size:.95rem">🕘 My Hours</div>
+        <div class="list-copy" style="margin-top:2px">Weekly, monthly and upcoming hours summary</div>
+      </div>
+      <div style="font-size:1.2rem;color:#534AB7;flex-shrink:0">›</div>
     </div>
 
     <div class="section-label">Personal details</div>

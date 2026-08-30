@@ -103,7 +103,8 @@ async function getAllData() {
     sickDays,
     medCerts,
     announcements,
-    meetingNotes
+    meetingNotes,
+    meetingNoteAcks
   ] = await Promise.all([
     fetchAllRows_('staff', query =>
       query.order('id', { ascending: true })
@@ -147,7 +148,11 @@ async function getAllData() {
 
     fetchAllRows_('meeting_notes', query =>
       query.order('meeting_date', { ascending: false })
-    )
+    ),
+
+    // Caught locally, not left to reject the whole Promise.all — this table is
+    // new and a missing/not-yet-created table must not break the rest of sync.
+    fetchAllRows_('meeting_note_acks', query => query).catch(err => ({ data: [], error: err }))
   ]);
 
   if (staff.error) {
@@ -165,7 +170,8 @@ async function getAllData() {
     sickDays,
     medCerts,
     announcements,
-    meetingNotes
+    meetingNotes,
+    meetingNoteAcks
   };
 
   Object.entries(optionalResults).forEach(([name, result]) => {
@@ -262,6 +268,14 @@ async function getAllData() {
     uploadedBy: m.uploaded_by
   }));
 
+  const mappedMeetingNoteAcks = (meetingNoteAcks.data || []).map(a => ({
+    ...a,
+    noteId: a.note_id,
+    staffId: normaliseId_(a.staff_id),
+    staffName: a.staff_name,
+    ackedAt: a.acked_at
+  }));
+
   console.log('Staff Portal data loaded:', {
     staff: staff.data?.length || 0,
     shifts: mappedShifts.length,
@@ -289,7 +303,8 @@ async function getAllData() {
       rx3_sickDays: JSON.stringify(mappedSickDays),
       rx3_medCerts: JSON.stringify(mappedMedCerts),
       rx3_announcements: JSON.stringify(mappedAnnouncements),
-      rx3_meetingNotes: JSON.stringify(mappedMeetingNotes)
+      rx3_meetingNotes: JSON.stringify(mappedMeetingNotes),
+      rx3_meetingNoteAcks: JSON.stringify(mappedMeetingNoteAcks)
     }
   };
 }
@@ -1119,20 +1134,23 @@ if (staffIds.length > 0) {
   // ── TEAM MEETINGS ─────────────────────────────────────────────
   const allMeetingNotes = getList('meetingNotes')
     .slice().sort((a,b)=>(b.meetingDate||b.meeting_date||'').localeCompare(a.meetingDate||a.meeting_date||''));
+  const myAckedNoteIds = new Set(getList('meetingNoteAcks').filter(a=>isMyEmpId_(a.staffId)).map(a=>String(a.noteId)));
+  const unackedCount = allMeetingNotes.filter(m=>!myAckedNoteIds.has(String(m.id))).length;
 
   const meetingSection = `
     <div class="section-label" style="display:flex;align-items:center;gap:6px">
       <span>📋 Team Meetings</span>
-      ${allMeetingNotes.length ? `<span style="font-size:10px;background:#534AB7;color:#fff;border-radius:10px;padding:1px 7px;font-weight:700">${allMeetingNotes.length}</span>` : ''}
+      ${unackedCount ? `<span style="font-size:10px;background:#A32D2D;color:#fff;border-radius:10px;padding:1px 7px;font-weight:700">${unackedCount} to read</span>` : ''}
       <span style="margin-left:auto;font-size:.78rem;font-weight:600;color:#534AB7;cursor:pointer" onclick="window.nav('teammeetings')">View all ›</span>
     </div>
     <div class="info-grid" style="margin-bottom:4px">
       ${allMeetingNotes.length ? allMeetingNotes.slice(0,3).map(m=>{
         const mDate = m.meetingDate || m.meeting_date;
         const dateLabel = mDate ? FDS(mDate) : '';
-        return `<div class="card list-card" style="cursor:pointer;border-left:3px solid #534AB7;padding-left:12px" onclick="openMeetingNotePopup('${m.id}')">
+        const isUnacked = !myAckedNoteIds.has(String(m.id));
+        return `<div class="card list-card" style="cursor:pointer;border-left:3px solid ${isUnacked?'#A32D2D':'#534AB7'};padding-left:12px" onclick="openMeetingNotePopup('${m.id}')">
           <div style="flex:1;min-width:0">
-            <div class="list-title" style="font-size:.95rem">${esc(m.title)}</div>
+            <div class="list-title" style="font-size:.95rem">${esc(m.title)}${isUnacked?' <span style="font-size:.7rem;font-weight:700;color:#A32D2D;vertical-align:middle">● unread</span>':''}</div>
             <div class="list-copy" style="margin-top:3px;font-size:.8rem">${dateLabel?`📅 ${esc(dateLabel)}`:''}${m.uploadedBy?` · ${esc(m.uploadedBy)}`:''}</div>
           </div>
           <div style="font-size:1.2rem;color:#534AB7;flex-shrink:0">›</div>
@@ -1356,6 +1374,42 @@ window.openAnnPopup = function(annId) {
   document.body.appendChild(popup);
 };
 
+function myMeetingNoteAck_(noteId) {
+  const emp = state.emp;
+  return getList('meetingNoteAcks').find(a =>
+    String(a.noteId) === String(noteId) && isMyEmpId_(a.staffId)
+  );
+}
+
+window.acknowledgeMeetingNote = async function(noteId) {
+  const emp = state.emp;
+  const btn = qs('#mn-ack-btn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
+  try {
+    const { error } = await supabase.from('meeting_note_acks').upsert({
+      note_id: noteId,
+      staff_id: emp.id,
+      staff_name: `${emp.first || ''} ${emp.last || ''}`.trim(),
+      acked_at: new Date().toISOString()
+    }, { onConflict: 'note_id,staff_id' });
+    if (error) throw error;
+
+    // Reflect immediately in the local cache so the badge updates without a full resync.
+    const acks = getList('meetingNoteAcks').filter(a =>
+      !(String(a.noteId) === String(noteId) && isMyEmpId_(a.staffId))
+    );
+    acks.push({ noteId, staffId: emp.id, staffName: `${emp.first || ''} ${emp.last || ''}`.trim(), ackedAt: new Date().toISOString() });
+    state.allData['rx3_meetingNoteAcks'] = JSON.stringify(acks);
+
+    openMeetingNotePopup(noteId);
+    renderHome();
+    renderTeamMeetingsPage();
+  } catch(e) {
+    alert('Could not save your acknowledgement: ' + (e.message || e));
+    if (btn) { btn.disabled = false; btn.textContent = "✓ I've read this"; }
+  }
+};
+
 window.openMeetingNotePopup = function(noteId) {
   const m = getList('meetingNotes').find(x => String(x.id) === String(noteId));
   if (!m) return;
@@ -1365,6 +1419,7 @@ window.openMeetingNotePopup = function(noteId) {
   const mDate = m.meetingDate || m.meeting_date;
   const dateFull = mDate ? new Date(mDate+'T00:00:00').toLocaleDateString('en-AU',{weekday:'long',day:'numeric',month:'long',year:'numeric'}) : '';
   const fileUrl = m.fileUrl || m.file_url;
+  const myAck = myMeetingNoteAck_(noteId);
 
   const popup = document.createElement('div');
   popup.id = 'meeting-note-popup';
@@ -1402,6 +1457,10 @@ window.openMeetingNotePopup = function(noteId) {
           </div>`:''}
         </div>
         ${fileUrl?`<a href="${fileUrl}" target="_blank" rel="noopener" class="btn btn-primary" style="width:100%;margin-top:18px;display:block;text-align:center;text-decoration:none">📄 View PDF</a>`:''}
+        ${myAck
+          ? `<div style="margin-top:10px;padding:10px 12px;background:#EAF7F1;color:#0F6E56;border-radius:12px;font-size:.85rem;font-weight:600;display:flex;align-items:center;gap:8px">✓ You acknowledged this on ${esc(new Date(myAck.ackedAt).toLocaleDateString('en-AU',{day:'numeric',month:'short',year:'numeric'}))}</div>`
+          : `<button id="mn-ack-btn" class="btn" style="width:100%;margin-top:10px;background:#534AB7;color:#fff;border-color:#534AB7" onclick="acknowledgeMeetingNote('${m.id}')">✓ I've read this</button>`
+        }
         <button onclick="document.getElementById('meeting-note-popup').remove()" class="btn btn-secondary" style="width:100%;margin-top:10px">Close</button>
       </div>
     </div>`;
@@ -3325,6 +3384,7 @@ function renderHours() {
 function renderTeamMeetingsPage() {
   const notes = getList('meetingNotes')
     .slice().sort((a,b)=>(b.meetingDate||b.meeting_date||'').localeCompare(a.meetingDate||a.meeting_date||''));
+  const myAckedNoteIds = new Set(getList('meetingNoteAcks').filter(a=>isMyEmpId_(a.staffId)).map(a=>String(a.noteId)));
 
   qs('#view-teammeetings').innerHTML = `
     <div class="page-header stack">
@@ -3335,9 +3395,10 @@ function renderTeamMeetingsPage() {
       ${notes.length ? notes.map(m=>{
         const mDate = m.meetingDate || m.meeting_date;
         const dateLabel = mDate ? FDS(mDate) : '';
-        return `<div class="card list-card" style="cursor:pointer;border-left:3px solid #534AB7;padding-left:12px" onclick="openMeetingNotePopup('${m.id}')">
+        const isUnacked = !myAckedNoteIds.has(String(m.id));
+        return `<div class="card list-card" style="cursor:pointer;border-left:3px solid ${isUnacked?'#A32D2D':'#534AB7'};padding-left:12px" onclick="openMeetingNotePopup('${m.id}')">
           <div style="flex:1;min-width:0">
-            <div class="list-title" style="font-size:.95rem">${esc(m.title)}</div>
+            <div class="list-title" style="font-size:.95rem">${esc(m.title)}${isUnacked?' <span style="font-size:.7rem;font-weight:700;color:#A32D2D;vertical-align:middle">● unread</span>':' <span style="font-size:.7rem;font-weight:700;color:#0F6E56;vertical-align:middle">✓ read</span>'}</div>
             <div class="list-copy" style="margin-top:3px;font-size:.8rem">${dateLabel?`📅 ${esc(dateLabel)}`:''}${m.uploadedBy?` · ${esc(m.uploadedBy)}`:''}</div>
             ${m.summary?`<div class="list-copy" style="margin-top:6px;font-size:.82rem;color:#3a3a35;line-height:1.45">${esc(m.summary.length>140?m.summary.slice(0,140)+'…':m.summary)}</div>`:''}
           </div>

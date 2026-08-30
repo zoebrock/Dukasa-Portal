@@ -60,6 +60,9 @@ function myMeetingNotes_() {
   const emp = state.emp;
   if (!emp) return [];
   return getList('meetingNotes').filter(m => {
+    // Drafts are never visible to staff — nobody's been notified yet, so there's
+    // nothing to show. Missing status (older rows) defaults to published.
+    if (m.status === 'draft') return false;
     const staffIds = m.staffIds || m.staff_ids || [];
     if (staffIds.length > 0) return staffIds.some(id => isMyEmpId_(id));
     const roles = m.roles || ['All Staff'];

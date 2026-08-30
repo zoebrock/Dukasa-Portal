@@ -1353,9 +1353,9 @@ window.openAnnPopup = function(annId) {
   popup.id = 'ann-popup';
   popup.style.cssText = 'position:fixed;inset:0;z-index:500;display:flex;align-items:flex-end;justify-content:center;background:rgba(0,0,0,.45);backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);animation:fadeIn .2s ease';
   popup.innerHTML = `
-    <div style="width:100%;max-width:520px;background:#fff;border-radius:22px 22px 0 0;padding:0 0 calc(env(safe-area-inset-bottom,0px) + 8px);animation:slideUp .28s cubic-bezier(.22,1,.36,1);overflow:hidden">
+    <div style="width:100%;max-width:520px;background:#fff;border-radius:22px 22px 0 0;max-height:88vh;display:flex;flex-direction:column;animation:slideUp .28s cubic-bezier(.22,1,.36,1)">
       <!-- Purple header bar -->
-      <div style="background:#534AB7;padding:20px 22px 18px">
+      <div style="background:#534AB7;padding:20px 22px 18px;flex-shrink:0;border-radius:22px 22px 0 0">
         <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px">
           <div style="flex:1">
             <div style="font-size:.7rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#AFA9EC;margin-bottom:5px">📣 Announcement</div>
@@ -1365,7 +1365,7 @@ window.openAnnPopup = function(annId) {
         </div>
       </div>
       <!-- Details -->
-      <div style="padding:18px 22px">
+      <div style="padding:18px 22px;overflow-y:auto;flex:1;-webkit-overflow-scrolling:touch">
         <div style="display:flex;flex-direction:column;gap:10px">
           <div style="display:flex;align-items:center;gap:10px">
             <span style="font-size:1.2rem">📅</span>
@@ -1400,7 +1400,9 @@ window.openAnnPopup = function(annId) {
             <div style="font-size:.9rem;color:#3a3a35;line-height:1.55;white-space:pre-wrap">${esc(a.desc)}</div>
           </div>`:''}
         </div>
-        <button onclick="document.getElementById('ann-popup').remove()" class="btn btn-secondary" style="width:100%;margin-top:18px">Close</button>
+      </div>
+      <div style="padding:14px 22px calc(14px + env(safe-area-inset-bottom,0px));flex-shrink:0;border-top:1px solid rgba(24,24,22,.06)">
+        <button onclick="document.getElementById('ann-popup').remove()" class="btn btn-secondary" style="width:100%">Close</button>
       </div>
     </div>`;
 
@@ -1415,6 +1417,20 @@ function myMeetingNoteAck_(noteId) {
     String(a.noteId) === String(noteId) && isMyEmpId_(a.staffId)
   );
 }
+
+// Fire-and-forget — logged when staff open the PDF, so the manager can see who's
+// actually opened it (not just who ticked "I've read this"). Doesn't block or
+// delay the PDF opening in its new tab either way.
+window.logMeetingNotePdfView = function(noteId) {
+  const emp = state.emp;
+  if (!emp) return;
+  supabase.from('meeting_note_pdf_views').insert({
+    note_id: noteId,
+    staff_id: emp.id,
+    staff_name: `${emp.first || ''} ${emp.last || ''}`.trim(),
+    viewed_at: new Date().toISOString()
+  }).then(({ error }) => { if (error) console.warn('PDF view log failed:', error.message); });
+};
 
 window.acknowledgeMeetingNote = async function(noteId) {
   const emp = state.emp;
@@ -1506,8 +1522,8 @@ window.openMeetingNotePopup = function(noteId) {
   popup.id = 'meeting-note-popup';
   popup.style.cssText = 'position:fixed;inset:0;z-index:500;display:flex;align-items:flex-end;justify-content:center;background:rgba(0,0,0,.45);backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);animation:fadeIn .2s ease';
   popup.innerHTML = `
-    <div style="width:100%;max-width:520px;background:#fff;border-radius:22px 22px 0 0;padding:0 0 calc(env(safe-area-inset-bottom,0px) + 8px);animation:slideUp .28s cubic-bezier(.22,1,.36,1);overflow:hidden">
-      <div style="background:#534AB7;padding:20px 22px 18px">
+    <div style="width:100%;max-width:520px;background:#fff;border-radius:22px 22px 0 0;max-height:88vh;display:flex;flex-direction:column;animation:slideUp .28s cubic-bezier(.22,1,.36,1)">
+      <div style="background:#534AB7;padding:20px 22px 18px;flex-shrink:0;border-radius:22px 22px 0 0">
         <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px">
           <div style="flex:1">
             <div style="font-size:.7rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#AFA9EC;margin-bottom:5px">📋 Team Meeting</div>
@@ -1516,7 +1532,7 @@ window.openMeetingNotePopup = function(noteId) {
           <button onclick="document.getElementById('meeting-note-popup').remove()" style="background:rgba(255,255,255,.15);border:none;color:#fff;border-radius:50%;width:32px;height:32px;font-size:18px;cursor:pointer;flex-shrink:0;display:flex;align-items:center;justify-content:center;line-height:1">×</button>
         </div>
       </div>
-      <div style="padding:18px 22px">
+      <div style="padding:18px 22px;overflow-y:auto;flex:1;-webkit-overflow-scrolling:touch">
         <div style="display:flex;flex-direction:column;gap:10px">
           ${dateFull?`<div style="display:flex;align-items:center;gap:10px">
             <span style="font-size:1.2rem">📅</span>
@@ -1537,7 +1553,7 @@ window.openMeetingNotePopup = function(noteId) {
             <div style="font-size:.9rem;color:#3a3a35;line-height:1.55;white-space:pre-wrap">${esc(m.summary)}</div>
           </div>`:''}
         </div>
-        ${fileUrl?`<a href="${fileUrl}" target="_blank" rel="noopener" class="btn btn-primary" style="width:100%;margin-top:18px;display:block;text-align:center;text-decoration:none">📄 View PDF</a>`:''}
+        ${fileUrl?`<a href="${fileUrl}" target="_blank" rel="noopener" class="btn btn-primary" style="width:100%;margin-top:18px;display:block;text-align:center;text-decoration:none" onclick="logMeetingNotePdfView('${m.id}')">📄 View PDF</a>`:''}
         ${myAck
           ? `<div style="margin-top:10px;padding:10px 12px;background:#EAF7F1;color:#0F6E56;border-radius:12px;font-size:.85rem;font-weight:600;display:flex;align-items:center;gap:8px">✓ You acknowledged this on ${esc(new Date(myAck.ackedAt).toLocaleDateString('en-AU',{day:'numeric',month:'short',year:'numeric'}))}</div>`
           : `<button id="mn-ack-btn" class="btn" style="width:100%;margin-top:10px;background:#534AB7;color:#fff;border-color:#534AB7" onclick="acknowledgeMeetingNote('${m.id}')">✓ I've read this</button>`
@@ -1551,8 +1567,9 @@ window.openMeetingNotePopup = function(noteId) {
             <button id="mn-comment-send" class="btn btn-primary btn-sm" style="min-height:40px" onclick="postMeetingNoteComment('${m.id}')">Send</button>
           </div>
         </div>
-
-        <button onclick="document.getElementById('meeting-note-popup').remove()" class="btn btn-secondary" style="width:100%;margin-top:18px">Close</button>
+      </div>
+      <div style="padding:14px 22px calc(14px + env(safe-area-inset-bottom,0px));flex-shrink:0;border-top:1px solid rgba(24,24,22,.06)">
+        <button onclick="document.getElementById('meeting-note-popup').remove()" class="btn btn-secondary" style="width:100%">Close</button>
       </div>
     </div>`;
 

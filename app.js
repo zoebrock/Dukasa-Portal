@@ -51,6 +51,21 @@ function isMyEmpId_(value) {
   const id = normaliseId_(value);
   return !!id && (state.empIds || []).some(x => normaliseId_(x) === id);
 }
+
+// A meeting note is visible to this staff member only if they're in its
+// selected staff list, or their role matches (or it's targeted at "All Staff") —
+// same audience logic as general announcements, so targeted uploads (including
+// a test sent to just the manager) don't leak to everyone.
+function myMeetingNotes_() {
+  const emp = state.emp;
+  if (!emp) return [];
+  return getList('meetingNotes').filter(m => {
+    const staffIds = m.staffIds || m.staff_ids || [];
+    if (staffIds.length > 0) return staffIds.some(id => isMyEmpId_(id));
+    const roles = m.roles || ['All Staff'];
+    return roles.includes('All Staff') || roles.includes(emp.role);
+  });
+}
 function isPublishedShift_(shift) {
   const v = shift?.published;
   return v === true || v === 1 || String(v).trim().toLowerCase() === 'true' || String(shift?.status || '').trim().toLowerCase() === 'published';
@@ -265,7 +280,9 @@ async function getAllData() {
     fileName: m.file_name,
     fileUrl: m.file_url,
     filePath: m.file_path,
-    uploadedBy: m.uploaded_by
+    uploadedBy: m.uploaded_by,
+    roles: m.roles || ['All Staff'],
+    staffIds: m.staff_ids || []
   }));
 
   const mappedMeetingNoteAcks = (meetingNoteAcks.data || []).map(a => ({
@@ -1132,7 +1149,7 @@ if (staffIds.length > 0) {
     </div>` : '';
 
   // ── TEAM MEETINGS ─────────────────────────────────────────────
-  const allMeetingNotes = getList('meetingNotes')
+  const allMeetingNotes = myMeetingNotes_()
     .slice().sort((a,b)=>(b.meetingDate||b.meeting_date||'').localeCompare(a.meetingDate||a.meeting_date||''));
   const myAckedNoteIds = new Set(getList('meetingNoteAcks').filter(a=>isMyEmpId_(a.staffId)).map(a=>String(a.noteId)));
   const unackedCount = allMeetingNotes.filter(m=>!myAckedNoteIds.has(String(m.id))).length;
@@ -1411,7 +1428,7 @@ window.acknowledgeMeetingNote = async function(noteId) {
 };
 
 window.openMeetingNotePopup = function(noteId) {
-  const m = getList('meetingNotes').find(x => String(x.id) === String(noteId));
+  const m = myMeetingNotes_().find(x => String(x.id) === String(noteId));
   if (!m) return;
   const existing = qs('#meeting-note-popup');
   if (existing) existing.remove();
@@ -3382,7 +3399,7 @@ function renderHours() {
 
 // ── TEAM MEETINGS (dedicated page) ──────────────────────────────
 function renderTeamMeetingsPage() {
-  const notes = getList('meetingNotes')
+  const notes = myMeetingNotes_()
     .slice().sort((a,b)=>(b.meetingDate||b.meeting_date||'').localeCompare(a.meetingDate||a.meeting_date||''));
   const myAckedNoteIds = new Set(getList('meetingNoteAcks').filter(a=>isMyEmpId_(a.staffId)).map(a=>String(a.noteId)));
 

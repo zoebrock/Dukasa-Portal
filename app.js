@@ -1543,16 +1543,16 @@ window.openMeetingNotePopup = function(noteId) {
           : `<button id="mn-ack-btn" class="btn" style="width:100%;margin-top:10px;background:#534AB7;color:#fff;border-color:#534AB7" onclick="acknowledgeMeetingNote('${m.id}')">✓ I've read this</button>`
         }
 
-        <div style="border-top:1px solid #e8e7e1;padding-top:14px;margin-top:16px">
+        <div style="border-top:1px solid #e8e7e1;padding-top:14px;margin-top:18px">
           <div style="font-size:.7rem;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:#98988f;margin-bottom:8px">Comments</div>
           <div id="mn-comments-list" style="display:flex;flex-direction:column;gap:8px;margin-bottom:10px">${meetingNoteCommentsHTML_(noteId)}</div>
           <div style="display:flex;gap:8px;align-items:flex-end">
-            <textarea id="mn-comment-input" rows="1" placeholder="Add a comment or question…" style="flex:1;resize:none;border:1px solid #e0dfd8;border-radius:12px;padding:10px 12px;font-size:.85rem;font-family:inherit;min-height:40px"></textarea>
+            <textarea id="mn-comment-input" rows="1" placeholder="Add a comment or question…" style="flex:1;resize:none;border:1px solid #e0dfd8;border-radius:12px;padding:10px 12px;font-size:.85rem;font-family:inherit;min-height:40px;box-sizing:border-box"></textarea>
             <button id="mn-comment-send" class="btn btn-primary btn-sm" style="min-height:40px" onclick="postMeetingNoteComment('${m.id}')">Send</button>
           </div>
         </div>
 
-        <button onclick="document.getElementById('meeting-note-popup').remove()" class="btn btn-secondary" style="width:100%;margin-top:14px">Close</button>
+        <button onclick="document.getElementById('meeting-note-popup').remove()" class="btn btn-secondary" style="width:100%;margin-top:18px">Close</button>
       </div>
     </div>`;
 

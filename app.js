@@ -119,7 +119,8 @@ async function getAllData() {
     medCerts,
     announcements,
     meetingNotes,
-    meetingNoteAcks
+    meetingNoteAcks,
+    meetingNoteComments
   ] = await Promise.all([
     fetchAllRows_('staff', query =>
       query.order('id', { ascending: true })
@@ -165,9 +166,12 @@ async function getAllData() {
       query.order('meeting_date', { ascending: false })
     ),
 
-    // Caught locally, not left to reject the whole Promise.all — this table is
+    // Caught locally, not left to reject the whole Promise.all — these tables are
     // new and a missing/not-yet-created table must not break the rest of sync.
-    fetchAllRows_('meeting_note_acks', query => query).catch(err => ({ data: [], error: err }))
+    fetchAllRows_('meeting_note_acks', query => query).catch(err => ({ data: [], error: err })),
+
+    fetchAllRows_('meeting_note_comments', query => query.order('created_at', { ascending: true }))
+      .catch(err => ({ data: [], error: err }))
   ]);
 
   if (staff.error) {
@@ -186,7 +190,8 @@ async function getAllData() {
     medCerts,
     announcements,
     meetingNotes,
-    meetingNoteAcks
+    meetingNoteAcks,
+    meetingNoteComments
   };
 
   Object.entries(optionalResults).forEach(([name, result]) => {
@@ -293,6 +298,15 @@ async function getAllData() {
     ackedAt: a.acked_at
   }));
 
+  const mappedMeetingNoteComments = (meetingNoteComments.data || []).map(c => ({
+    ...c,
+    noteId: c.note_id,
+    staffId: normaliseId_(c.staff_id),
+    staffName: c.staff_name,
+    comment: c.comment,
+    createdAt: c.created_at
+  }));
+
   console.log('Staff Portal data loaded:', {
     staff: staff.data?.length || 0,
     shifts: mappedShifts.length,
@@ -321,7 +335,8 @@ async function getAllData() {
       rx3_medCerts: JSON.stringify(mappedMedCerts),
       rx3_announcements: JSON.stringify(mappedAnnouncements),
       rx3_meetingNotes: JSON.stringify(mappedMeetingNotes),
-      rx3_meetingNoteAcks: JSON.stringify(mappedMeetingNoteAcks)
+      rx3_meetingNoteAcks: JSON.stringify(mappedMeetingNoteAcks),
+      rx3_meetingNoteComments: JSON.stringify(mappedMeetingNoteComments)
     }
   };
 }
@@ -1427,6 +1442,52 @@ window.acknowledgeMeetingNote = async function(noteId) {
   }
 };
 
+function meetingNoteCommentsHTML_(noteId) {
+  const comments = getList('meetingNoteComments')
+    .filter(c => String(c.noteId) === String(noteId))
+    .sort((a,b) => (a.createdAt||'').localeCompare(b.createdAt||''));
+  if (!comments.length) return `<div style="font-size:.82rem;color:#98988f">No comments yet — be the first to react.</div>`;
+  return comments.map(c => `
+    <div style="background:#f5f4f0;border-radius:12px;padding:8px 12px">
+      <div style="font-size:.78rem;font-weight:700;color:#181816">${esc(c.staffName || 'Staff')} <span style="font-weight:400;color:#98988f;font-size:.72rem">${esc(new Date(c.createdAt).toLocaleDateString('en-AU',{day:'numeric',month:'short'}))}</span></div>
+      <div style="font-size:.85rem;color:#3a3a35;margin-top:2px;white-space:pre-wrap">${esc(c.comment)}</div>
+    </div>`).join('');
+}
+
+window.postMeetingNoteComment = async function(noteId) {
+  const emp = state.emp;
+  const input = qs('#mn-comment-input');
+  const text = (input?.value || '').trim();
+  if (!text) return;
+  const sendBtn = qs('#mn-comment-send');
+  if (sendBtn) sendBtn.disabled = true;
+  try {
+    const id = 'mnc' + Date.now() + Math.random().toString(36).slice(2,6);
+    const row = {
+      id,
+      note_id: noteId,
+      staff_id: emp.id,
+      staff_name: `${emp.first || ''} ${emp.last || ''}`.trim(),
+      comment: text,
+      created_at: new Date().toISOString()
+    };
+    const { error } = await supabase.from('meeting_note_comments').insert(row);
+    if (error) throw error;
+
+    const comments = getList('meetingNoteComments');
+    comments.push({ id, noteId, staffId: emp.id, staffName: row.staff_name, comment: text, createdAt: row.created_at });
+    state.allData['rx3_meetingNoteComments'] = JSON.stringify(comments);
+
+    if (input) input.value = '';
+    const list = qs('#mn-comments-list');
+    if (list) list.innerHTML = meetingNoteCommentsHTML_(noteId);
+  } catch(e) {
+    alert('Could not post your comment: ' + (e.message || e));
+  } finally {
+    if (sendBtn) sendBtn.disabled = false;
+  }
+};
+
 window.openMeetingNotePopup = function(noteId) {
   const m = myMeetingNotes_().find(x => String(x.id) === String(noteId));
   if (!m) return;
@@ -1478,7 +1539,17 @@ window.openMeetingNotePopup = function(noteId) {
           ? `<div style="margin-top:10px;padding:10px 12px;background:#EAF7F1;color:#0F6E56;border-radius:12px;font-size:.85rem;font-weight:600;display:flex;align-items:center;gap:8px">✓ You acknowledged this on ${esc(new Date(myAck.ackedAt).toLocaleDateString('en-AU',{day:'numeric',month:'short',year:'numeric'}))}</div>`
           : `<button id="mn-ack-btn" class="btn" style="width:100%;margin-top:10px;background:#534AB7;color:#fff;border-color:#534AB7" onclick="acknowledgeMeetingNote('${m.id}')">✓ I've read this</button>`
         }
-        <button onclick="document.getElementById('meeting-note-popup').remove()" class="btn btn-secondary" style="width:100%;margin-top:10px">Close</button>
+
+        <div style="border-top:1px solid #e8e7e1;padding-top:14px;margin-top:16px">
+          <div style="font-size:.7rem;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:#98988f;margin-bottom:8px">Comments</div>
+          <div id="mn-comments-list" style="display:flex;flex-direction:column;gap:8px;margin-bottom:10px">${meetingNoteCommentsHTML_(noteId)}</div>
+          <div style="display:flex;gap:8px;align-items:flex-end">
+            <textarea id="mn-comment-input" rows="1" placeholder="Add a comment or question…" style="flex:1;resize:none;border:1px solid #e0dfd8;border-radius:12px;padding:10px 12px;font-size:.85rem;font-family:inherit;min-height:40px"></textarea>
+            <button id="mn-comment-send" class="btn btn-primary btn-sm" style="min-height:40px" onclick="postMeetingNoteComment('${m.id}')">Send</button>
+          </div>
+        </div>
+
+        <button onclick="document.getElementById('meeting-note-popup').remove()" class="btn btn-secondary" style="width:100%;margin-top:14px">Close</button>
       </div>
     </div>`;
 

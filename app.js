@@ -22,6 +22,7 @@ const state = {
   weekOffset: 0,
   leaveCalendarMonth: null,
   empIds: [],
+  annFilter: 'active',
 };
 
 function normaliseId_(value) {
@@ -83,6 +84,17 @@ function myAnnouncements_() {
     return a.roles.includes(emp.role);
   });
 }
+
+function myCalendarEvents_() {
+  const emp = state.emp;
+  if (!emp) return [];
+  return getList('calendarEvents').filter(e => {
+    const staffIds = e.staffIds || e.staff_ids || [];
+    if (staffIds.length > 0) return staffIds.some(id => isMyEmpId_(id));
+    const roles = e.roles || ['All Staff'];
+    return roles.includes('All Staff') || roles.includes(emp.role);
+  });
+}
 function isPublishedShift_(shift) {
   const v = shift?.published;
   return v === true || v === 1 || String(v).trim().toLowerCase() === 'true' || String(shift?.status || '').trim().toLowerCase() === 'published';
@@ -137,7 +149,8 @@ async function getAllData() {
     announcements,
     meetingNotes,
     meetingNoteAcks,
-    meetingNoteComments
+    meetingNoteComments,
+    calendarEvents
   ] = await Promise.all([
     fetchAllRows_('staff', query =>
       query.order('id', { ascending: true })
@@ -188,6 +201,9 @@ async function getAllData() {
     fetchAllRows_('meeting_note_acks', query => query).catch(err => ({ data: [], error: err })),
 
     fetchAllRows_('meeting_note_comments', query => query.order('created_at', { ascending: true }))
+      .catch(err => ({ data: [], error: err })),
+
+    fetchAllRows_('calendar_events', query => query.order('date', { ascending: true }))
       .catch(err => ({ data: [], error: err }))
   ]);
 
@@ -208,7 +224,8 @@ async function getAllData() {
     announcements,
     meetingNotes,
     meetingNoteAcks,
-    meetingNoteComments
+    meetingNoteComments,
+    calendarEvents
   };
 
   Object.entries(optionalResults).forEach(([name, result]) => {
@@ -292,6 +309,9 @@ async function getAllData() {
 
   const mappedAnnouncements = (announcements.data || []).map(a => ({
     ...a,
+    // The real Supabase column is `description` — `desc` was never populated,
+    // so every announcement's detail text has been silently blank in the Portal.
+    desc: a.desc || a.description || '',
     staffIds: a.staffIds || a.staff_ids || a.staffids || [],
     notifyStaff: a.notifyStaff || a.notify_staff || false
   }));
@@ -324,6 +344,13 @@ async function getAllData() {
     createdAt: c.created_at
   }));
 
+  const mappedCalendarEvents = (calendarEvents.data || []).map(e => ({
+    ...e,
+    endDate: e.end_date,
+    roles: e.roles || ['All Staff'],
+    staffIds: e.staff_ids || []
+  }));
+
   console.log('Staff Portal data loaded:', {
     staff: staff.data?.length || 0,
     shifts: mappedShifts.length,
@@ -353,7 +380,8 @@ async function getAllData() {
       rx3_announcements: JSON.stringify(mappedAnnouncements),
       rx3_meetingNotes: JSON.stringify(mappedMeetingNotes),
       rx3_meetingNoteAcks: JSON.stringify(mappedMeetingNoteAcks),
-      rx3_meetingNoteComments: JSON.stringify(mappedMeetingNoteComments)
+      rx3_meetingNoteComments: JSON.stringify(mappedMeetingNoteComments),
+      rx3_calendarEvents: JSON.stringify(mappedCalendarEvents)
     }
   };
 }
@@ -862,6 +890,7 @@ function buildApp() {
         <section id="view-hours"   class="view"></section>
         <section id="view-teammeetings" class="view"></section>
         <section id="view-announcements" class="view"></section>
+        <section id="view-calendar" class="view"></section>
         <section id="view-profile" class="view"></section>
       </main>
       <nav class="tabbar">
@@ -915,7 +944,7 @@ function anim(root=document) {
 }
 
 function renderAll() {
-  renderHome(); renderRoster(); renderLeave(); renderOT(); renderHours(); renderTeamMeetingsPage(); renderAnnouncementsPage(); renderProfile();
+  renderHome(); renderRoster(); renderLeave(); renderOT(); renderHours(); renderTeamMeetingsPage(); renderAnnouncementsPage(); renderCalendarView(); renderProfile();
   anim(qs('#view-'+state.currentView));
 }
 
@@ -1162,7 +1191,7 @@ const h = shiftHrs(todayShift);
       <span style="margin-left:auto;font-size:.78rem;font-weight:600;color:#534AB7;cursor:pointer" onclick="window.nav('announcements')">View all ›</span>
     </div>
     <div class="info-grid" style="margin-bottom:4px">
-      ${myAnns.length ? myAnns.slice(0,3).map(a=>{
+      ${myAnns.length ? myAnns.slice(0,1).map(a=>{
         const annDate = a.date && String(a.date).match(/^\d{4}-\d{2}-\d{2}$/) ? a.date : null;
         const dateObj = annDate ? new Date(annDate+'T00:00:00') : null;
         const dateLabel = dateObj ? dateObj.toLocaleDateString('en-AU',{weekday:'short',day:'numeric',month:'short'}) : (a.date||'');
@@ -1193,7 +1222,7 @@ const h = shiftHrs(todayShift);
       <span style="margin-left:auto;font-size:.78rem;font-weight:600;color:#534AB7;cursor:pointer" onclick="window.nav('teammeetings')">View all ›</span>
     </div>
     <div class="info-grid" style="margin-bottom:4px">
-      ${allMeetingNotes.length ? allMeetingNotes.slice(0,3).map(m=>{
+      ${allMeetingNotes.length ? allMeetingNotes.slice(0,1).map(m=>{
         const mDate = m.meetingDate || m.meeting_date;
         const dateLabel = mDate ? FDS(mDate) : '';
         const isUnacked = !myAckedNoteIds.has(String(m.id));
@@ -1205,6 +1234,32 @@ const h = shiftHrs(todayShift);
           <div style="font-size:1.2rem;color:#534AB7;flex-shrink:0">›</div>
         </div>`;
       }).join('') : `<div class="helper-note">No meeting notes have been posted yet.</div>`}
+    </div>`;
+
+  // ── TEAM CALENDAR ─────────────────────────────────────────────
+  const upcomingEvents = myCalendarEvents_()
+    .filter(e => (e.endDate || e.date) >= td)
+    .sort((a,b)=>(a.date||"").localeCompare(b.date||""));
+
+  const calSection = `
+    <div class="section-label" style="display:flex;align-items:center;gap:6px">
+      <span>📅 Team Calendar</span>
+      <span style="margin-left:auto;font-size:.78rem;font-weight:600;color:#534AB7;cursor:pointer" onclick="window.nav('calendar')">View all ›</span>
+    </div>
+    <div class="info-grid" style="margin-bottom:4px">
+      ${upcomingEvents.length ? upcomingEvents.slice(0,1).map(e=>{
+        const dateLabel = e.date ? FDS(e.date) : '';
+        const isToday = e.date===td;
+        const isTomorrow = e.date===addDays(td,1);
+        const relLabel = isToday?' · Today':isTomorrow?' · Tomorrow':'';
+        return `<div class="card list-card" style="cursor:pointer;border-left:3px solid #534AB7;padding-left:12px" onclick="window.nav('calendar')">
+          <div style="flex:1;min-width:0">
+            <div class="list-title" style="font-size:.95rem">${esc(e.title)}</div>
+            <div class="list-copy" style="margin-top:3px;font-size:.8rem">📅 ${esc(dateLabel)}${esc(relLabel)}${e.endDate&&e.endDate!==e.date?` – ${esc(FDS(e.endDate))}`:''}${e.time?` · 🕐 ${esc(e.time)}`:''}</div>
+          </div>
+          <div style="font-size:1.2rem;color:#534AB7;flex-shrink:0">›</div>
+        </div>`;
+      }).join('') : `<div class="helper-note">No upcoming events.</div>`}
     </div>`;
 
   const week = Array.from({length:7},(_,i)=>{
@@ -1313,6 +1368,7 @@ ${outstandingMC ? `
 ${breakBanner}
 ${annSection}
     ${meetingSection}
+    ${calSection}
     ${teamSection}
     <div class="section-label">This week at a glance</div>
     <div class="week-strip">
@@ -3534,20 +3590,33 @@ function renderTeamMeetingsPage() {
 }
 
 // ── ANNOUNCEMENTS (dedicated page) ──────────────────────────────
+window.setAnnFilter = function(filter){
+  state.annFilter = filter;
+  renderAnnouncementsPage();
+};
+
 function renderAnnouncementsPage() {
   const td = today();
-  const anns = myAnnouncements_()
+  const filter = state.annFilter || 'active';
+  const allAnns = myAnnouncements_();
+  const anns = allAnns
+    .filter(a => {
+      const isPast = a.date && a.date < td;
+      return filter === 'past' ? isPast : !isPast;
+    })
     .slice()
-    .sort((a,b)=>{
-      const aFuture = (a.date||'') >= td, bFuture = (b.date||'') >= td;
-      if(aFuture !== bFuture) return aFuture ? -1 : 1;
-      return aFuture ? (a.date||"").localeCompare(b.date||"") : (b.date||"").localeCompare(a.date||"");
-    });
+    .sort((a,b)=> filter === 'past' ? (b.date||"").localeCompare(a.date||"") : (a.date||"").localeCompare(b.date||""));
+
+  const tabBtn = (key, label) => `<button onclick="setAnnFilter('${key}')" style="flex:1;padding:8px 0;border-radius:10px;border:none;font-size:.82rem;font-weight:600;cursor:pointer;background:${filter===key?'#534AB7':'transparent'};color:${filter===key?'#fff':'#58584e'}">${label}</button>`;
 
   qs('#view-announcements').innerHTML = `
     <div class="page-header stack">
       <h1 class="page-title">Announcements</h1>
-      <div class="page-subtitle">Everything the team's posted — nothing here disappears once its date passes.</div>
+      <div class="page-subtitle">Nothing here disappears once its event date passes — switch to Past to find it.</div>
+    </div>
+    <div style="display:flex;gap:4px;background:#efeee9;border-radius:12px;padding:4px;margin-bottom:14px">
+      ${tabBtn('active','Active')}
+      ${tabBtn('past','Past')}
     </div>
     <div class="info-grid">
       ${anns.length ? anns.map(a=>{
@@ -3565,8 +3634,77 @@ function renderAnnouncementsPage() {
         </div>`;
       }).join('') : `<div class="card" style="text-align:center;padding:34px 20px;color:#707067">
         <div style="font-size:28px;margin-bottom:8px">📣</div>
-        <p>No announcements yet.</p>
+        <p>No ${filter==='past'?'past':'active'} announcements.</p>
       </div>`}
+    </div>`;
+}
+
+// ── TEAM CALENDAR (read-only) ───────────────────────────────────
+window.shiftPortalCalMonth = function(delta){
+  state.calMonthCursor.setMonth(state.calMonthCursor.getMonth() + delta);
+  renderCalendarView();
+};
+window.goToPortalCalToday = function(){
+  state.calMonthCursor = new Date(); state.calMonthCursor.setDate(1);
+  state.calSelectedDate = today();
+  renderCalendarView();
+};
+window.selectPortalCalDay = function(ds){
+  state.calSelectedDate = ds;
+  renderCalendarView();
+};
+
+function renderCalendarView(){
+  const el = qs('#view-calendar');
+  if(!el) return;
+  if(!state.calMonthCursor){ state.calMonthCursor = new Date(); state.calMonthCursor.setDate(1); }
+  if(!state.calSelectedDate) state.calSelectedDate = today();
+
+  const events = myCalendarEvents_();
+  const year = state.calMonthCursor.getFullYear(), month = state.calMonthCursor.getMonth();
+  const firstOfMonth = new Date(year, month, 1);
+  const startOffset = (firstOfMonth.getDay() + 6) % 7;
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const td = today();
+
+  const eventsForDate = ds => events.filter(e => ds >= e.date && ds <= (e.endDate || e.date));
+
+  const dow = ['M','T','W','T','F','S','S'];
+  let grid = dow.map(d => `<div style="text-align:center;font-size:10px;font-weight:700;color:#98988f;padding:4px 0">${d}</div>`).join('');
+  for(let i=0;i<startOffset;i++) grid += `<div></div>`;
+  for(let d=1; d<=daysInMonth; d++){
+    const ds = `${year}-${String(month+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+    const dayEvents = eventsForDate(ds);
+    const isToday = ds===td, isSelected = ds===state.calSelectedDate;
+    grid += `<div onclick="selectPortalCalDay('${ds}')" style="aspect-ratio:1;border-radius:8px;padding:4px;cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;background:${isSelected?'#534AB7':isToday?'#EEEDFE':'transparent'};border:1px solid ${isSelected?'#534AB7':'#e8e7e1'}">
+      <span style="font-size:11px;font-weight:${isToday?'700':'500'};color:${isSelected?'#fff':isToday?'#534AB7':'#181816'}">${d}</span>
+      ${dayEvents.length?`<div style="display:flex;gap:2px;margin-top:2px">${dayEvents.slice(0,3).map(()=>`<span style="width:5px;height:5px;border-radius:50%;background:${isSelected?'#fff':'#534AB7'}"></span>`).join('')}</div>`:''}
+    </div>`;
+  }
+
+  const dayEvents = eventsForDate(state.calSelectedDate);
+  const dateLabel = new Date(state.calSelectedDate+'T00:00:00').toLocaleDateString('en-AU',{weekday:'long',day:'numeric',month:'long',year:'numeric'});
+
+  el.innerHTML = `
+    <div class="page-header stack">
+      <h1 class="page-title">Team Calendar</h1>
+      <div class="page-subtitle">Events the team's been told about.</div>
+    </div>
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
+      <button class="btn btn-secondary btn-sm" onclick="shiftPortalCalMonth(-1)">‹</button>
+      <div style="font-weight:700;font-size:.95rem;min-width:130px;text-align:center">${state.calMonthCursor.toLocaleDateString('en-AU',{month:'long',year:'numeric'})}</div>
+      <button class="btn btn-secondary btn-sm" onclick="shiftPortalCalMonth(1)">›</button>
+      <button class="btn btn-secondary btn-sm" onclick="goToPortalCalToday()" style="margin-left:auto">Today</button>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px;margin-bottom:18px">${grid}</div>
+    <div style="font-size:.85rem;font-weight:700;color:#181816;margin-bottom:10px">${esc(dateLabel)}</div>
+    <div class="info-grid">
+      ${dayEvents.length ? dayEvents.map(e => `
+        <div class="card" style="border-left:3px solid #534AB7;padding-left:14px">
+          <div class="list-title" style="font-size:.95rem">${esc(e.title)}</div>
+          <div class="list-copy" style="margin-top:3px;font-size:.8rem">${e.endDate&&e.endDate!==e.date?`📅 ${esc(FDS(e.date))} – ${esc(FDS(e.endDate))}`:''}${e.time?` · 🕐 ${esc(e.time)}`:''}${e.location?` · 📍 ${esc(e.location)}`:''}</div>
+          ${e.description?`<div style="margin-top:8px;font-size:.86rem;color:#3a3a35;line-height:1.5;white-space:pre-wrap">${esc(e.description)}</div>`:''}
+        </div>`).join('') : `<div class="helper-note">No events on this day.</div>`}
     </div>`;
 }
 

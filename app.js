@@ -69,6 +69,20 @@ function myMeetingNotes_() {
     return roles.includes('All Staff') || roles.includes(emp.role);
   });
 }
+
+// An announcement's `date` is the event day, not a visibility control — it
+// should never make the announcement disappear once that date passes.
+function myAnnouncements_() {
+  const emp = state.emp;
+  if (!emp) return [];
+  return getList('announcements').filter(a => {
+    const staffIds = a.staffIds || a.staff_ids || a.staffids || [];
+    if (staffIds.length > 0) return staffIds.map(String).includes(String(emp.id));
+    if (!a.roles || !a.roles.length) return true;
+    if (a.roles.includes('All Staff')) return true;
+    return a.roles.includes(emp.role);
+  });
+}
 function isPublishedShift_(shift) {
   const v = shift?.published;
   return v === true || v === 1 || String(v).trim().toLowerCase() === 'true' || String(shift?.status || '').trim().toLowerCase() === 'published';
@@ -847,6 +861,7 @@ function buildApp() {
         <section id="view-chat"    class="view"></section>
         <section id="view-hours"   class="view"></section>
         <section id="view-teammeetings" class="view"></section>
+        <section id="view-announcements" class="view"></section>
         <section id="view-profile" class="view"></section>
       </main>
       <nav class="tabbar">
@@ -900,7 +915,7 @@ function anim(root=document) {
 }
 
 function renderAll() {
-  renderHome(); renderRoster(); renderLeave(); renderOT(); renderHours(); renderTeamMeetingsPage(); renderProfile();
+  renderHome(); renderRoster(); renderLeave(); renderOT(); renderHours(); renderTeamMeetingsPage(); renderAnnouncementsPage(); renderProfile();
   anim(qs('#view-'+state.currentView));
 }
 
@@ -1128,34 +1143,33 @@ const h = shiftHrs(todayShift);
   }
 
   // ── ANNOUNCEMENTS ──────────────────────────────────────────
-  const allAnns = getList('announcements');
-  const myAnns  = allAnns.filter(a => {
-    const annDate = a.date && String(a.date).match(/^\d{4}-\d{2}-\d{2}$/) ? a.date : null;
-    if(!annDate) return false; // skip announcements with invalid dates
-    if(annDate < td) return false;
-    const staffIds = a.staffIds || a.staff_ids || a.staffids || [];
+  // Home shows the soonest few as a teaser; the dedicated Announcements page
+  // (myAnnouncements_()) is where the full list lives, including past ones —
+  // an announcement's date is descriptive (when the event is), not a
+  // visibility gate, so nothing disappears once its date passes.
+  const myAnns = myAnnouncements_()
+    .slice()
+    .sort((a,b)=>{
+      const aFuture = (a.date||'') >= td, bFuture = (b.date||'') >= td;
+      if(aFuture !== bFuture) return aFuture ? -1 : 1; // upcoming/today first, then past
+      return aFuture ? (a.date||"").localeCompare(b.date||"") : (b.date||"").localeCompare(a.date||"");
+    });
 
-if (staffIds.length > 0) {
-  return staffIds.map(String).includes(String(emp.id));
-}
-    if(!a.roles||!a.roles.length) return true;
-    if(a.roles.includes('All Staff')) return true;
-    return a.roles.includes(emp.role);
-  }).sort((a,b)=>(a.date||"").localeCompare(b.date||""));
-
-  const annSection = myAnns.length ? `
+  const annSection = `
     <div class="section-label" style="display:flex;align-items:center;gap:6px">
       <span>📣 Announcements</span>
-      <span style="font-size:10px;background:#534AB7;color:#fff;border-radius:10px;padding:1px 7px;font-weight:700">${myAnns.length}</span>
+      ${myAnns.length ? `<span style="font-size:10px;background:#534AB7;color:#fff;border-radius:10px;padding:1px 7px;font-weight:700">${myAnns.length}</span>` : ''}
+      <span style="margin-left:auto;font-size:.78rem;font-weight:600;color:#534AB7;cursor:pointer" onclick="window.nav('announcements')">View all ›</span>
     </div>
     <div class="info-grid" style="margin-bottom:4px">
-      ${myAnns.map(a=>{
+      ${myAnns.length ? myAnns.slice(0,3).map(a=>{
         const annDate = a.date && String(a.date).match(/^\d{4}-\d{2}-\d{2}$/) ? a.date : null;
         const dateObj = annDate ? new Date(annDate+'T00:00:00') : null;
         const dateLabel = dateObj ? dateObj.toLocaleDateString('en-AU',{weekday:'short',day:'numeric',month:'short'}) : (a.date||'');
         const isToday = annDate===td;
         const isTomorrow = annDate===addDays(td,1);
-        const relLabel = isToday?' · Today':isTomorrow?' · Tomorrow':'';
+        const isPast = annDate && annDate < td;
+        const relLabel = isToday?' · Today':isTomorrow?' · Tomorrow':isPast?' · Past':'';
         return `<div class="card list-card" style="cursor:pointer;border-left:3px solid #534AB7;padding-left:12px" onclick="openAnnPopup('${a.id}')">
           <div style="flex:1;min-width:0">
             <div class="list-title" style="font-size:.95rem">${esc(a.title)}</div>
@@ -1163,8 +1177,8 @@ if (staffIds.length > 0) {
           </div>
           <div style="font-size:1.2rem;color:#534AB7;flex-shrink:0">›</div>
         </div>`;
-      }).join('')}
-    </div>` : '';
+      }).join('') : `<div class="helper-note">No announcements yet.</div>`}
+    </div>`;
 
   // ── TEAM MEETINGS ─────────────────────────────────────────────
   const allMeetingNotes = myMeetingNotes_()
@@ -3515,6 +3529,43 @@ function renderTeamMeetingsPage() {
       }).join('') : `<div class="card" style="text-align:center;padding:34px 20px;color:#707067">
         <div style="font-size:28px;margin-bottom:8px">📋</div>
         <p>No meeting notes have been posted yet.</p>
+      </div>`}
+    </div>`;
+}
+
+// ── ANNOUNCEMENTS (dedicated page) ──────────────────────────────
+function renderAnnouncementsPage() {
+  const td = today();
+  const anns = myAnnouncements_()
+    .slice()
+    .sort((a,b)=>{
+      const aFuture = (a.date||'') >= td, bFuture = (b.date||'') >= td;
+      if(aFuture !== bFuture) return aFuture ? -1 : 1;
+      return aFuture ? (a.date||"").localeCompare(b.date||"") : (b.date||"").localeCompare(a.date||"");
+    });
+
+  qs('#view-announcements').innerHTML = `
+    <div class="page-header stack">
+      <h1 class="page-title">Announcements</h1>
+      <div class="page-subtitle">Everything the team's posted — nothing here disappears once its date passes.</div>
+    </div>
+    <div class="info-grid">
+      ${anns.length ? anns.map(a=>{
+        const annDate = a.date && String(a.date).match(/^\d{4}-\d{2}-\d{2}$/) ? a.date : null;
+        const dateObj = annDate ? new Date(annDate+'T00:00:00') : null;
+        const dateLabel = dateObj ? dateObj.toLocaleDateString('en-AU',{weekday:'short',day:'numeric',month:'short',year:'numeric'}) : (a.date||'');
+        const isToday = annDate===td;
+        const isTomorrow = annDate===addDays(td,1);
+        const isPast = annDate && annDate < td;
+        const relLabel = isToday?' · Today':isTomorrow?' · Tomorrow':isPast?' · Past':'';
+        return `<div class="card" style="border-left:3px solid ${isPast?'#c9c8c2':'#534AB7'};padding-left:14px">
+          <div class="list-title" style="font-size:.98rem">${esc(a.title)}</div>
+          <div class="list-copy" style="margin-top:3px;font-size:.8rem">${annDate?`📅 ${esc(dateLabel)}${esc(relLabel)}`:''}${a.time?` · 🕐 ${esc(a.time)}`:''}${a.location?` · 📍 ${esc(a.location)}`:''}</div>
+          ${a.desc?`<div style="margin-top:8px;font-size:.88rem;color:#3a3a35;line-height:1.55;white-space:pre-wrap">${esc(a.desc)}</div>`:''}
+        </div>`;
+      }).join('') : `<div class="card" style="text-align:center;padding:34px 20px;color:#707067">
+        <div style="font-size:28px;margin-bottom:8px">📣</div>
+        <p>No announcements yet.</p>
       </div>`}
     </div>`;
 }

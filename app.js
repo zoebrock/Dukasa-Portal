@@ -3055,6 +3055,24 @@ function renderOT() {
   `;
 }
 
+// Break policy, keyed off gross (total) shift hours — mirrors the Manager
+// Portal's calcBreakMin so an OT-extended shift picks up the right break
+// allowance wherever it's read from, not just recalculated live on-screen.
+//   3–5h   = 10 min
+//   6–7.5h = 40 min
+//   8h+    = 50 min
+//   <3h    = no mandated break
+function calcBreakMin(start, end) {
+  if (!start || !end) return 0;
+  const [sh, sm] = start.split(':').map(Number);
+  const [eh, em] = end.split(':').map(Number);
+  const grossHrs = ((eh * 60 + em) - (sh * 60 + sm)) / 60;
+  if (grossHrs >= 8) return 50;
+  if (grossHrs >= 6) return 40;
+  if (grossHrs >= 3) return 10;
+  return 0;
+}
+
 async function applyApprovedOTToShift(ot) {
   const shifts = getList('shifts');
 
@@ -3098,6 +3116,7 @@ async function applyApprovedOTToShift(ot) {
       ...s,
       start: newStart,
       end: newEnd,
+      breakMin: calcBreakMin(newStart, newEnd),
       published: true,
       status: 'published',
       otOriginalStart: origStart,
@@ -3111,7 +3130,7 @@ async function applyApprovedOTToShift(ot) {
       date: updatedShift.date,
       start: updatedShift.start,
       end: updatedShift.end,
-      break_min: updatedShift.breakMin || 30,
+      break_min: updatedShift.breakMin,
       paid_break_min: updatedShift.paidBreakMin || 0,
       role: updatedShift.role || '',
       notes: updatedShift.notes || '',

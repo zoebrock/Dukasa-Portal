@@ -3668,7 +3668,7 @@ function renderAnnouncementsPage() {
 
 // ── UNIFORM ORDERS ───────────────────────────────────────────────
 const UNIFORM_CATALOG = [
-  { key:'scrubTop', name:'Essential Crewneck Scrub Top', price:70,
+  { key:'scrubTop', name:'Scrub Top', price:70,
     fitSizes:{ "Women's":['XXS','XS','S','M','L','XL','XXL','3XL','4XL','5XL'], "Men's":['S','M','L','XL','XXL','3XL','4XL','5XL'] } },
   { key:'scrubPants', name:'Scrub Pants', price:80, styles:['Straight Leg','Jogger'],
     fitSizes:{ "Women's":['XXS','XS','S','M','L','XL','XXL','3XL','4XL','5XL'], "Men's":['S','M','L','XL','XXL','3XL','4XL','5XL'] } },
@@ -3817,7 +3817,11 @@ window.submitUniformOrder = async function submitUniformOrder(){
       key, name: item.name, fit: sel.fit||null, style: sel.style||null,
       type: sel.type||null, size: sel.size||null, qty: sel.qty,
       unitPrice: item.price, lineTotal: uniformItemTotal(sel),
-      notes: parts.join(' · ')
+      notes: parts.join(' · '),
+      // Tracks supplier fulfilment separately from invoicing/payment status —
+      // set on the Manager Portal's Order Tracker as stock actually gets
+      // ordered/arrives. pending -> ordered -> complete.
+      fulfillmentStatus: 'pending'
     };
   });
   const total = items.reduce((t,i)=>t+i.lineTotal,0);

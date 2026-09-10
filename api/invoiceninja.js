@@ -92,11 +92,14 @@ export default async function handler(req, res) {
 
     const invoiceId = invoice.data.id;
 
-    // Emailing the invoice both sends it to the client and generates the
-    // client-portal payment link (returned on the invitation object below).
+    // mark_sent (not "email") — moves the invoice out of draft and makes its
+    // payment link live, without Invoice Ninja emailing the client. The
+    // payment link itself is sent via SMS instead (see submitUniformOrder in
+    // app.js); the client's email stays on their Invoice Ninja profile from
+    // findOrCreateClient above regardless.
     await niFetch('/invoices/bulk', {
       method: 'POST',
-      body: JSON.stringify({ action: 'email', ids: [invoiceId] })
+      body: JSON.stringify({ action: 'mark_sent', ids: [invoiceId] })
     });
 
     const refreshed = await niFetch(`/invoices/${invoiceId}?include=invitations`);

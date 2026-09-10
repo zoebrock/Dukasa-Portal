@@ -3872,6 +3872,21 @@ window.submitUniformOrder = async function submitUniformOrder(){
       error_message: invoiceResult?.ok ? null : (invoiceResult?.error || 'Unknown error')
     }).eq('id', orderId);
 
+    // The payment link goes out via SMS, not email — Invoice Ninja is told to
+    // mark_sent rather than email (see api/invoiceninja.js), so this text is
+    // the only thing that actually delivers the link to the staff member.
+    // The client's email still lands on their Invoice Ninja profile from the
+    // find-or-create-client step regardless of this SMS succeeding.
+    let smsSent = false;
+    if (invoiceResult?.ok && invoiceResult?.invoiceUrl) {
+      try {
+        await smsPost_(state.emp.phone, `Hi ${state.emp.first || ''}, here's the payment link for your Dukasa uniform order ($${total.toFixed(2)}): ${invoiceResult.invoiceUrl}`);
+        smsSent = true;
+      } catch(err) {
+        console.warn('Uniform order payment SMS failed:', err.message);
+      }
+    }
+
     gasPost({
       action: 'sendEmail',
       fn: 'sendUniformOrderNotification',
@@ -3888,9 +3903,11 @@ window.submitUniformOrder = async function submitUniformOrder(){
     state.uniformOrder = {};
     state.uniformConfirm = {};
     toast(
-      invoiceResult?.ok
-        ? 'Order submitted! Check your email for the payment link.'
-        : "Order submitted! We're following up on payment separately.",
+      smsSent
+        ? "Order submitted! We've texted you the payment link."
+        : invoiceResult?.ok
+          ? 'Order submitted! Invoice created — check with your manager for the payment link.'
+          : "Order submitted! We're following up on payment separately.",
       'success', 5000
     );
     window.nav('home');

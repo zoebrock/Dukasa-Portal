@@ -14,6 +14,14 @@
       "destination": "/api/invoiceninja.js"
     },
     {
+      "source": "/api/invoiceninja-status",
+      "destination": "/api/invoiceninja-status.js"
+    },
+    {
+      "source": "/api/invoiceninja-webhook",
+      "destination": "/api/invoiceninja-webhook.js"
+    },
+    {
       "source": "/(.*)",
       "destination": "/index.html"
     }

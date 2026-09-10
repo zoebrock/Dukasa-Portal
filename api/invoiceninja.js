@@ -74,7 +74,10 @@ export default async function handler(req, res) {
       product_key: it.name,
       notes: it.notes || it.name,
       cost: Number(it.unitPrice) || 0,
-      qty: Number(it.qty) || 1
+      // Invoice Ninja's v5 API field is "quantity", not "qty" — the latter is
+      // silently ignored and defaults to 0, which is why line/invoice totals
+      // came back as $0.00 despite the correct unit cost showing.
+      quantity: Number(it.qty) || 1
     }));
 
     const invoice = await niFetch('/invoices', {

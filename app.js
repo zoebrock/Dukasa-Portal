@@ -891,6 +891,7 @@ function buildApp() {
         <section id="view-teammeetings" class="view"></section>
         <section id="view-announcements" class="view"></section>
         <section id="view-calendar" class="view"></section>
+        <section id="view-uniform" class="view"></section>
         <section id="view-profile" class="view"></section>
       </main>
       <nav class="tabbar">
@@ -944,7 +945,7 @@ function anim(root=document) {
 }
 
 function renderAll() {
-  renderHome(); renderRoster(); renderLeave(); renderOT(); renderHours(); renderTeamMeetingsPage(); renderAnnouncementsPage(); renderCalendarView(); renderProfile();
+  renderHome(); renderRoster(); renderLeave(); renderOT(); renderHours(); renderTeamMeetingsPage(); renderAnnouncementsPage(); renderCalendarView(); renderUniformPage(); renderProfile();
   anim(qs('#view-'+state.currentView));
 }
 
@@ -1366,6 +1367,13 @@ ${outstandingMC ? `
   </div>
 ` : ''}
 ${breakBanner}
+  <div class="card" style="margin:14px 0;padding:16px 18px;border:1px solid rgba(83,74,183,.2);background:#f4f2ff;border-radius:18px;display:flex;align-items:center;justify-content:space-between;gap:12px;cursor:pointer" onclick="window.nav('uniform')">
+    <div>
+      <div style="font-weight:700;color:#534AB7;margin-bottom:2px">🧺 Order uniform</div>
+      <div style="font-size:13px;color:#585854">Scrubs, jumpers, lab coats — submit an order any time.</div>
+    </div>
+    <div style="font-size:1.2rem;color:#534AB7">›</div>
+  </div>
 ${annSection}
     ${meetingSection}
     ${calSection}
@@ -3657,6 +3665,240 @@ function renderAnnouncementsPage() {
       </div>`}
     </div>`;
 }
+
+// ── UNIFORM ORDERS ───────────────────────────────────────────────
+const UNIFORM_CATALOG = [
+  { key:'scrubTop', name:'Essential Crewneck Scrub Top', price:70,
+    fitSizes:{ "Women's":['XXS','XS','S','M','L','XL','XXL','3XL','4XL','5XL'], "Men's":['S','M','L','XL','XXL','3XL','4XL','5XL'] } },
+  { key:'scrubPants', name:'Scrub Pants', price:80, styles:['Straight Leg','Jogger'],
+    fitSizes:{ "Women's":['XXS','XS','S','M','L','XL','XXL','3XL','4XL','5XL'], "Men's":['S','M','L','XL','XXL','3XL','4XL','5XL'] } },
+  { key:'winterFleece', name:'Winter Fleece Crewneck Jumper', price:70, sizes:['S','M','L','XL','XXL','3XL','4XL','5XL'] },
+  { key:'summerJumper', name:'Summer Cotton Crewneck Jumper', price:70, sizes:['S','M','L','XL','XXL','3XL','4XL'] },
+  { key:'labCoat', name:'Lab Coat', price:70, types:['Pharmacist Coat','Lab Technician Coat'], sizes:['XS','S','M','L','XL','XXL','3XL'] }
+];
+
+function initUniformOrderState(){
+  if(!state.uniformOrder) state.uniformOrder = {};
+  if(!state.uniformConfirm) state.uniformConfirm = {};
+}
+
+function uniformItemTotal(sel){
+  return (Number(sel.qty)||0) * (sel.price||0);
+}
+
+function uniformOrderTotal(){
+  return Object.values(state.uniformOrder||{}).filter(Boolean).reduce((t,sel)=>t+uniformItemTotal(sel),0);
+}
+
+window.toggleUniformItem = function(key, on){
+  initUniformOrderState();
+  const item = UNIFORM_CATALOG.find(i=>i.key===key);
+  if(on){
+    const firstFit = item.fitSizes ? Object.keys(item.fitSizes)[0] : undefined;
+    state.uniformOrder[key] = {
+      price: item.price,
+      qty: 1,
+      fit: firstFit,
+      style: item.styles ? item.styles[0] : undefined,
+      type: item.types ? item.types[0] : undefined,
+      size: item.sizes ? item.sizes[0] : (item.fitSizes ? item.fitSizes[firstFit][0] : undefined)
+    };
+  } else {
+    delete state.uniformOrder[key];
+  }
+  renderUniformPage();
+};
+
+window.updateUniformField = function(key, field, value){
+  if(!state.uniformOrder[key]) return;
+  state.uniformOrder[key][field] = field==='qty' ? Math.max(1, parseInt(value)||1) : value;
+  if(field==='fit'){
+    const item = UNIFORM_CATALOG.find(i=>i.key===key);
+    if(item.fitSizes) state.uniformOrder[key].size = item.fitSizes[value][0];
+  }
+  renderUniformPage();
+};
+
+window.setUniformConfirm = function(key, val){
+  initUniformOrderState();
+  state.uniformConfirm[key] = val;
+  renderUniformPage();
+};
+
+function renderUniformCatalogCard(item){
+  const sel = state.uniformOrder?.[item.key];
+  const checked = !!sel;
+  let fieldsHtml = '';
+  if(checked){
+    const sizeOptions = item.fitSizes ? item.fitSizes[sel.fit] : item.sizes;
+    fieldsHtml = `
+      <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px">
+        ${item.fitSizes ? `<select onchange="updateUniformField('${item.key}','fit',this.value)" class="input" style="flex:1;min-width:100px">
+          ${Object.keys(item.fitSizes).map(f=>`<option value="${esc(f)}" ${sel.fit===f?'selected':''}>${esc(f)}</option>`).join('')}
+        </select>` : ''}
+        ${item.styles ? `<select onchange="updateUniformField('${item.key}','style',this.value)" class="input" style="flex:1;min-width:110px">
+          ${item.styles.map(s=>`<option value="${esc(s)}" ${sel.style===s?'selected':''}>${esc(s)}</option>`).join('')}
+        </select>` : ''}
+        ${item.types ? `<select onchange="updateUniformField('${item.key}','type',this.value)" class="input" style="flex:1;min-width:150px">
+          ${item.types.map(t=>`<option value="${esc(t)}" ${sel.type===t?'selected':''}>${esc(t)}</option>`).join('')}
+        </select>` : ''}
+        <select onchange="updateUniformField('${item.key}','size',this.value)" class="input" style="flex:1;min-width:80px">
+          ${sizeOptions.map(s=>`<option value="${esc(s)}" ${sel.size===s?'selected':''}>${esc(s)}</option>`).join('')}
+        </select>
+        <input type="number" min="1" value="${sel.qty}" oninput="updateUniformField('${item.key}','qty',this.value)" class="input" style="width:64px;flex:0 0 64px">
+      </div>
+      <div style="margin-top:8px;font-size:.85rem;color:#534AB7;font-weight:700">$${uniformItemTotal(sel).toFixed(2)}</div>
+    `;
+  }
+  return `
+    <div class="card" style="margin-bottom:10px;${checked?'border-color:#534AB7':''}">
+      <label style="display:flex;align-items:center;gap:10px;cursor:pointer">
+        <input type="checkbox" ${checked?'checked':''} onchange="toggleUniformItem('${item.key}',this.checked)" style="width:20px;height:20px;flex-shrink:0;accent-color:#534AB7">
+        <div style="flex:1">
+          <div class="list-title" style="font-size:.95rem">${esc(item.name)}</div>
+          <div class="list-copy" style="font-size:.8rem">$${item.price} each</div>
+        </div>
+      </label>
+      ${fieldsHtml}
+    </div>
+  `;
+}
+
+function renderUniformPage(){
+  initUniformOrderState();
+  const hasItems = Object.keys(state.uniformOrder).length > 0;
+  const total = uniformOrderTotal();
+  const confirmed = state.uniformConfirm;
+  const canSubmit = hasItems && confirmed.a && confirmed.b;
+
+  const el = qs('#view-uniform');
+  if(!el) return;
+
+  el.innerHTML = `
+    <div class="page-header stack">
+      <button class="btn btn-secondary btn-sm" onclick="window.nav('home')" style="margin-bottom:8px">← Back</button>
+      <h1 class="page-title">Order uniform</h1>
+      <div class="page-subtitle">Select everything you need, then submit one order. You'll be emailed a payment link once it's placed.</div>
+    </div>
+    ${UNIFORM_CATALOG.map(renderUniformCatalogCard).join('')}
+    ${hasItems ? `
+      <div class="card" style="margin-top:16px;background:#f4f2ff;border:1px solid rgba(83,74,183,.25)">
+        <div style="font-weight:700;color:#534AB7;margin-bottom:10px;font-size:1.05rem">Order total: $${total.toFixed(2)}</div>
+        <label style="display:flex;align-items:flex-start;gap:8px;font-size:.82rem;margin-bottom:10px;cursor:pointer;line-height:1.4">
+          <input type="checkbox" ${confirmed.a?'checked':''} onchange="setUniformConfirm('a',this.checked)" style="margin-top:2px;width:18px;height:18px;flex-shrink:0;accent-color:#534AB7">
+          <span>I have checked my selected items and sizing and understand that payment must be made before my uniform order is placed.</span>
+        </label>
+        <label style="display:flex;align-items:flex-start;gap:8px;font-size:.82rem;margin-bottom:16px;cursor:pointer;line-height:1.4">
+          <input type="checkbox" ${confirmed.b?'checked':''} onchange="setUniformConfirm('b',this.checked)" style="margin-top:2px;width:18px;height:18px;flex-shrink:0;accent-color:#534AB7">
+          <span>I understand that uniform orders are placed specifically based on the selections submitted above and changes may not be possible once the order has been placed.</span>
+        </label>
+        <button class="btn btn-primary" id="uf-submit-btn" style="width:100%" ${canSubmit?'':'disabled'} onclick="submitUniformOrder()">Submit order — $${total.toFixed(2)}</button>
+      </div>
+    ` : `<div class="card" style="text-align:center;padding:28px 20px;color:#707067">
+      <div style="font-size:28px;margin-bottom:8px">🧺</div>
+      <p>Select at least one item above to continue.</p>
+    </div>`}
+  `;
+}
+
+window.submitUniformOrder = async function submitUniformOrder(){
+  initUniformOrderState();
+  const entries = Object.entries(state.uniformOrder);
+  if(!entries.length || !state.uniformConfirm.a || !state.uniformConfirm.b) return;
+
+  const items = entries.map(([key, sel])=>{
+    const item = UNIFORM_CATALOG.find(i=>i.key===key);
+    const parts = [];
+    if(sel.type) parts.push(sel.type); else parts.push(item.name);
+    if(sel.fit) parts.push(sel.fit);
+    if(sel.style) parts.push(sel.style);
+    if(sel.size) parts.push('Size ' + sel.size);
+    return {
+      key, name: item.name, fit: sel.fit||null, style: sel.style||null,
+      type: sel.type||null, size: sel.size||null, qty: sel.qty,
+      unitPrice: item.price, lineTotal: uniformItemTotal(sel),
+      notes: parts.join(' · ')
+    };
+  });
+  const total = items.reduce((t,i)=>t+i.lineTotal,0);
+  const orderId = 'uf' + Date.now() + Math.random().toString(36).slice(2,7);
+  const empName = `${state.emp.first||''} ${state.emp.last||''}`.trim();
+
+  const btn = qs('#uf-submit-btn');
+  if(btn){ btn.disabled = true; btn.textContent = 'Submitting…'; }
+
+  try {
+    const { error: insertErr } = await supabase.from('uniform_orders').insert({
+      id: orderId,
+      emp_id: state.emp.id,
+      emp_name: empName,
+      emp_email: state.emp.email || '',
+      items,
+      total,
+      status: 'submitted',
+      created_at: new Date().toISOString()
+    });
+    if (insertErr) throw insertErr;
+
+    // Invoice Ninja invoice + payment link — best-effort. The order itself is
+    // already saved above even if this fails, so nothing is lost; the
+    // Manager Portal's Uniform Orders page shows a "Retry invoice" action
+    // for anything that lands in invoice_failed status.
+    let invoiceResult;
+    try {
+      const res = await fetch('/api/invoiceninja', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          clientName: empName,
+          clientEmail: state.emp.email || '',
+          items: items.map(i => ({ name: i.name, notes: i.notes, unitPrice: i.unitPrice, qty: i.qty })),
+          orderId
+        })
+      });
+      invoiceResult = await res.json();
+    } catch(err) {
+      invoiceResult = { ok: false, error: err.message };
+    }
+
+    await supabase.from('uniform_orders').update({
+      status: invoiceResult?.ok ? 'invoiced' : 'invoice_failed',
+      invoice_ninja_invoice_id: invoiceResult?.invoiceId || null,
+      invoice_url: invoiceResult?.invoiceUrl || null,
+      error_message: invoiceResult?.ok ? null : (invoiceResult?.error || 'Unknown error')
+    }).eq('id', orderId);
+
+    gasPost({
+      action: 'sendEmail',
+      fn: 'sendUniformOrderNotification',
+      payload: {
+        empId: state.emp.id,
+        empName, empFirst: state.emp.first || '', empLast: state.emp.last || '',
+        empEmail: state.emp.email || '',
+        items: items.map(i => `${i.notes} x${i.qty}`).join('; '),
+        total: total.toFixed(2),
+        invoiced: !!invoiceResult?.ok
+      }
+    }).catch(err => console.warn('Uniform order email failed:', err));
+
+    state.uniformOrder = {};
+    state.uniformConfirm = {};
+    toast(
+      invoiceResult?.ok
+        ? 'Order submitted! Check your email for the payment link.'
+        : "Order submitted! We're following up on payment separately.",
+      'success', 5000
+    );
+    window.nav('home');
+    renderHome();
+    renderUniformPage();
+
+  } catch(err) {
+    console.error('Uniform order submit failed:', err);
+    toast('Could not submit your order: ' + err.message, 'error');
+    if(btn){ btn.disabled = false; btn.textContent = `Submit order — $${total.toFixed(2)}`; }
+  }
+};
 
 // ── TEAM CALENDAR (read-only) ───────────────────────────────────
 window.shiftPortalCalMonth = function(delta){

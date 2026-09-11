@@ -1144,8 +1144,23 @@ if (onBreak && activeBreak) {
   `;
 }
 
-  // Show break info in Today's shift card — total break only, no paid/unpaid
-  const breakLine = todayShift ? `${todayShift.breakMin||breakInfo.total} min break` : '';
+  // Show break info in Today's shift card. If the manager has set this staff
+  // member's scheduled lunch break time for today's weekday, show the exact
+  // time it's rostered for; otherwise fall back to just the duration.
+  function fmtBreakTime_(hhmm) {
+    const [h, m] = (hhmm || '').split(':').map(Number);
+    if (Number.isNaN(h)) return '';
+    const d = new Date(); d.setHours(h, m || 0, 0, 0);
+    return d.toLocaleTimeString('en-AU', { hour: 'numeric', minute: '2-digit' });
+  }
+  const todayDow = FDOW(td).slice(0, 3);
+  const scheduledBreak = state.emp?.breakSchedule?.[todayDow];
+  const breakMinTotal = todayShift ? (todayShift.breakMin || breakInfo.total) : 0;
+  const breakLine = todayShift
+    ? (scheduledBreak?.time
+        ? `Break at ${fmtBreakTime_(scheduledBreak.time)} · ${scheduledBreak.min || breakMinTotal} min`
+        : `${breakMinTotal} min break`)
+    : '';
 
   let todayCard;
   if (todaySick) {

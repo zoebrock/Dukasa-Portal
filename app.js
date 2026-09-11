@@ -1154,7 +1154,7 @@ if (onBreak && activeBreak) {
     return d.toLocaleTimeString('en-AU', { hour: 'numeric', minute: '2-digit' });
   }
   const todayDow = FDOW(td).slice(0, 3);
-  const scheduledBreak = state.emp?.breakSchedule?.[todayDow];
+  const scheduledBreak = state.emp?.break_schedule?.[todayDow];
   const breakMinTotal = todayShift ? (todayShift.breakMin || breakInfo.total) : 0;
   const breakLine = todayShift
     ? (scheduledBreak?.time

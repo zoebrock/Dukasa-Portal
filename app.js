@@ -147,6 +147,7 @@ async function getAllData() {
     sickDays,
     medCerts,
     announcements,
+    announcementAcks,
     meetingNotes,
     meetingNoteAcks,
     meetingNoteComments,
@@ -192,6 +193,10 @@ async function getAllData() {
       query.order('id', { ascending: true })
     ),
 
+    // Caught locally — this table is new and a missing/not-yet-created table
+    // must not break the rest of sync.
+    fetchAllRows_('announcement_acks', query => query).catch(err => ({ data: [], error: err })),
+
     fetchAllRows_('meeting_notes', query =>
       query.order('meeting_date', { ascending: false })
     ),
@@ -222,6 +227,7 @@ async function getAllData() {
     sickDays,
     medCerts,
     announcements,
+    announcementAcks,
     meetingNotes,
     meetingNoteAcks,
     meetingNoteComments,
@@ -316,6 +322,15 @@ async function getAllData() {
     notifyStaff: a.notifyStaff || a.notify_staff || false
   }));
 
+  const mappedAnnouncementAcks = (announcementAcks.data || []).map(a => ({
+    ...a,
+    announcementId: a.announcement_id,
+    staffId: normaliseId_(a.staff_id),
+    staffName: a.staff_name,
+    ackedAt: a.acked_at,
+    reactedAt: a.reacted_at
+  }));
+
   const mappedMeetingNotes = (meetingNotes.data || []).map(m => ({
     ...m,
     meetingDate: m.meeting_date,
@@ -378,6 +393,7 @@ async function getAllData() {
       rx3_sickDays: JSON.stringify(mappedSickDays),
       rx3_medCerts: JSON.stringify(mappedMedCerts),
       rx3_announcements: JSON.stringify(mappedAnnouncements),
+      rx3_announcementAcks: JSON.stringify(mappedAnnouncementAcks),
       rx3_meetingNotes: JSON.stringify(mappedMeetingNotes),
       rx3_meetingNoteAcks: JSON.stringify(mappedMeetingNoteAcks),
       rx3_meetingNoteComments: JSON.stringify(mappedMeetingNoteComments),
@@ -3637,6 +3653,55 @@ window.setAnnFilter = function(filter){
   renderAnnouncementsPage();
 };
 
+const ANNOUNCEMENT_REACTION_EMOJIS = ['👍','❤️','🎉','😂','👀'];
+
+function myAnnouncementAck_(annId) {
+  return getList('announcementAcks').find(a =>
+    String(a.announcementId) === String(annId) && isMyEmpId_(a.staffId)
+  );
+}
+
+window.reactToAnnouncement = async function(annId, emoji) {
+  const emp = state.emp;
+  if (!emp) return;
+  const existing = myAnnouncementAck_(annId);
+  const now = new Date().toISOString();
+  // Tapping a reaction also counts as acknowledging — an ack date, once set,
+  // is never overwritten by a later reaction change.
+  const ackedAt = existing?.ackedAt || now;
+  try {
+    const { error } = await supabase.from('announcement_acks').upsert({
+      announcement_id: annId,
+      staff_id: emp.id,
+      staff_name: `${emp.first || ''} ${emp.last || ''}`.trim(),
+      acked_at: ackedAt,
+      emoji: emoji || existing?.emoji || null,
+      reacted_at: emoji ? now : (existing?.reactedAt || null)
+    }, { onConflict: 'announcement_id,staff_id' });
+    if (error) throw error;
+
+    const acks = getList('announcementAcks').filter(a =>
+      !(String(a.announcementId) === String(annId) && isMyEmpId_(a.staffId))
+    );
+    acks.push({
+      announcementId: annId, staffId: emp.id,
+      staffName: `${emp.first || ''} ${emp.last || ''}`.trim(),
+      ackedAt, emoji: emoji || existing?.emoji || null,
+      reactedAt: emoji ? now : (existing?.reactedAt || null)
+    });
+    state.allData['rx3_announcementAcks'] = JSON.stringify(acks);
+
+    renderAnnouncementsPage();
+    renderHome();
+  } catch(e) {
+    alert('Could not save your response: ' + (e.message || e));
+  }
+};
+
+window.acknowledgeAnnouncement = function(annId) {
+  reactToAnnouncement(annId, null);
+};
+
 function renderAnnouncementsPage() {
   const td = today();
   const filter = state.annFilter || 'active';
@@ -3669,10 +3734,19 @@ function renderAnnouncementsPage() {
         const isTomorrow = annDate===addDays(td,1);
         const isPast = annDate && annDate < td;
         const relLabel = isToday?' · Today':isTomorrow?' · Tomorrow':isPast?' · Past':'';
+        const myAck = myAnnouncementAck_(a.id);
         return `<div class="card" style="border-left:3px solid ${isPast?'#c9c8c2':'#534AB7'};padding-left:14px">
           <div class="list-title" style="font-size:.98rem">${esc(a.title)}</div>
           <div class="list-copy" style="margin-top:3px;font-size:.8rem">${annDate?`📅 ${esc(dateLabel)}${esc(relLabel)}`:''}${a.time?` · 🕐 ${esc(a.time)}`:''}${a.location?` · 📍 ${esc(a.location)}`:''}</div>
           ${a.desc?`<div style="margin-top:8px;font-size:.88rem;color:#3a3a35;line-height:1.55;white-space:pre-wrap">${esc(a.desc)}</div>`:''}
+          <div style="margin-top:10px;padding-top:10px;border-top:1px solid #efeee9;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+            ${myAck?.ackedAt
+              ? `<span style="font-size:.78rem;font-weight:600;color:#0F6E56;background:#EAF7F1;border-radius:20px;padding:4px 10px">✓ Acknowledged</span>`
+              : `<button class="btn btn-sm" style="background:#534AB7;color:#fff;border-color:#534AB7" onclick="acknowledgeAnnouncement('${a.id}')">✓ Acknowledge</button>`}
+            <div style="display:flex;gap:2px">
+              ${ANNOUNCEMENT_REACTION_EMOJIS.map(e=>`<button onclick="reactToAnnouncement('${a.id}','${e}')" style="border:none;background:${myAck?.emoji===e?'#efeee9':'transparent'};border-radius:8px;font-size:1.1rem;padding:3px 5px;cursor:pointer;line-height:1">${e}</button>`).join('')}
+            </div>
+          </div>
         </div>`;
       }).join('') : `<div class="card" style="text-align:center;padding:34px 20px;color:#707067">
         <div style="font-size:28px;margin-bottom:8px">📣</div>

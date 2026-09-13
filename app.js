@@ -76,7 +76,10 @@ function myMeetingNotes_() {
 function myAnnouncements_() {
   const emp = state.emp;
   if (!emp) return [];
+  const td = today();
   return getList('announcements').filter(a => {
+    if (a.status === 'draft') return false;
+    if (a.publishDate && a.publishDate > td) return false;
     const staffIds = a.staffIds || a.staff_ids || a.staffids || [];
     if (staffIds.length > 0) return staffIds.map(String).includes(String(emp.id));
     if (!a.roles || !a.roles.length) return true;
@@ -319,7 +322,9 @@ async function getAllData() {
     // so every announcement's detail text has been silently blank in the Portal.
     desc: a.desc || a.description || '',
     staffIds: a.staffIds || a.staff_ids || a.staffids || [],
-    notifyStaff: a.notifyStaff || a.notify_staff || false
+    notifyStaff: a.notifyStaff || a.notify_staff || false,
+    status: a.status || 'published',
+    publishDate: a.publishDate || a.publish_date || null
   }));
 
   const mappedAnnouncementAcks = (announcementAcks.data || []).map(a => ({

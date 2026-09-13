@@ -1514,6 +1514,9 @@ window.openAnnPopup = function(annId) {
             <div style="font-size:.9rem;color:#3a3a35;line-height:1.55;white-space:pre-wrap">${esc(a.desc)}</div>
           </div>`:''}
         </div>
+        <div style="border-top:1px solid #e8e7e1;padding-top:14px;margin-top:18px">
+          <div data-ack-react>${annPopupAckReactHTML_(a.id)}</div>
+        </div>
       </div>
       <div style="padding:14px 22px calc(14px + env(safe-area-inset-bottom,0px));flex-shrink:0;border-top:1px solid rgba(24,24,22,.06)">
         <button onclick="document.getElementById('ann-popup').remove()" class="btn btn-secondary" style="width:100%">Close</button>
@@ -1524,6 +1527,19 @@ window.openAnnPopup = function(annId) {
   popup.addEventListener('click', e=>{ if(e.target===popup) popup.remove(); });
   document.body.appendChild(popup);
 };
+
+function annPopupAckReactHTML_(annId) {
+  const myAck = myAnnouncementAck_(annId);
+  return `
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+      ${myAck?.ackedAt
+        ? `<span style="font-size:.78rem;font-weight:600;color:#0F6E56;background:#EAF7F1;border-radius:20px;padding:4px 10px">✓ Acknowledged</span>`
+        : `<button class="btn btn-sm" style="background:#534AB7;color:#fff;border-color:#534AB7" onclick="acknowledgeAnnouncement('${annId}')">✓ Acknowledge</button>`}
+      <div style="display:flex;gap:2px">
+        ${ANNOUNCEMENT_REACTION_EMOJIS.map(e=>`<button onclick="reactToAnnouncement('${annId}','${e}')" style="border:none;background:${myAck?.emoji===e?'#efeee9':'transparent'};border-radius:8px;font-size:1.1rem;padding:3px 5px;cursor:pointer;line-height:1">${e}</button>`).join('')}
+      </div>
+    </div>`;
+}
 
 function myMeetingNoteAck_(noteId) {
   const emp = state.emp;
@@ -3696,6 +3712,9 @@ window.reactToAnnouncement = async function(annId, emoji) {
     });
     state.allData['rx3_announcementAcks'] = JSON.stringify(acks);
 
+    // Refresh whichever surface triggered this, without closing an open popup.
+    const popupBody = qs('#ann-popup [data-ack-react]');
+    if (popupBody) popupBody.outerHTML = `<div data-ack-react>${annPopupAckReactHTML_(annId)}</div>`;
     renderAnnouncementsPage();
     renderHome();
   } catch(e) {

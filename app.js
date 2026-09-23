@@ -1184,11 +1184,11 @@ if (onBreak && activeBreak) {
     : '';
 
   let todayCard;
-  if (todaySick) {
-    todayCard=`<div class="card card-compact" style="border-color:rgba(163,45,45,.25);background:rgba(163,45,45,.06)"><span style="font-weight:600;color:#A32D2D">🤒 Sick day recorded today</span></div>`;
-  } else if (todayLeave) {
-    todayCard=`<div class="card card-compact" style="border-color:rgba(15,110,86,.2);background:rgba(15,110,86,.06)"><span style="font-weight:600;color:#0F6E56">🏖 On approved leave today</span></div>`;
-  } else if (todayShift) {
+  // A working shift (even a shortened one, after a partial leave/sick segment
+  // has carved out part of the day) is the authoritative source for today —
+  // check it before the full-day sick/leave banners, which used to win even
+  // when the person actually still worked part of the day.
+  if (todayShift) {
 const h = shiftHrs(todayShift);
     todayCard=`<div class="card card-purple">
       <div style="font-size:.72rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#534AB7;margin-bottom:4px">Today's shift</div>
@@ -1204,6 +1204,10 @@ const h = shiftHrs(todayShift);
   </div>
 ` : ''}
     </div>`;
+  } else if (todaySick) {
+    todayCard=`<div class="card card-compact" style="border-color:rgba(163,45,45,.25);background:rgba(163,45,45,.06)"><span style="font-weight:600;color:#A32D2D">🤒 Sick day recorded today</span></div>`;
+  } else if (todayLeave) {
+    todayCard=`<div class="card card-compact" style="border-color:rgba(15,110,86,.2);background:rgba(15,110,86,.06)"><span style="font-weight:600;color:#0F6E56">🏖 On approved leave today</span></div>`;
   } else {
     todayCard=`<div class="card card-compact"><span class="helper-note">No shift scheduled today.</span></div>`;
   }
@@ -1307,7 +1311,9 @@ const h = shiftHrs(todayShift);
 
   // ── TODAY'S TEAM ─────────────────────────────────────────────
   const allStaff    = getList('staff');
-  const allShifts   = getList('shifts').filter(s=>s.date===td&&s.published&&normaliseId_(s.empId)!==normaliseId_(emp.id));
+  const allShiftsRaw2 = getList('shifts').filter(s=>s.date===td&&s.published&&normaliseId_(s.empId)!==normaliseId_(emp.id));
+  const allShifts   = allShiftsRaw2.filter(s=>!(s.entryType==='leave'||s.entry_type==='leave'));
+  const allLeaveSegs2 = allShiftsRaw2.filter(s=>s.entryType==='leave'||s.entry_type==='leave');
   const allSick     = getList('sickDays').filter(s=>s.date===td);
   const allLeaves   = getList('leaveRequests').filter(l=>l.status==='approved'&&l.from<=td&&l.to>=td);
 
@@ -1315,18 +1321,21 @@ const h = shiftHrs(todayShift);
   const teamToday = allShifts.map(s=>{
     const col = allStaff.find(x=>normaliseId_(x.id)===normaliseId_(s.empId));
     if(!col) return null;
-    const isSick  = allSick.some(sk=>sk.empId===col.id);
-    const onLeave = allLeaves.find(l=>l.empId===col.id);
+    const partialSeg = allLeaveSegs2.find(seg=>seg.empId===s.empId);
+    const isSick  = !partialSeg && allSick.some(sk=>sk.empId===col.id);
+    const onLeave = !partialSeg && allLeaves.find(l=>l.empId===col.id);
 const netHrs = shiftHrs(s);
-    return {col, s, isSick, onLeave, netHrs};
+    return {col, s, isSick, onLeave, partialSeg, netHrs};
   }).filter(Boolean).sort((a,b)=>(a.col.first||"").localeCompare(b.col.first||""));
 
   const teamSection = teamToday.length ? `
     <div class="section-label">Today's team</div>
     <div class="info-grid" style="margin-bottom:4px">
-      ${teamToday.map(({col,s,isSick,onLeave,netHrs})=>{
+      ${teamToday.map(({col,s,isSick,onLeave,partialSeg,netHrs})=>{
         const initials = (col.first[0]||'')+(col.last[0]||'');
-        const statusBadge = isSick
+        const statusBadge = partialSeg
+          ? ''
+          : isSick
           ? `<span style="font-size:.72rem;background:#FCEBEB;color:#791F1F;padding:1px 7px;border-radius:10px;font-weight:600">🤒 Sick</span>`
           : onLeave
           ? `<span style="font-size:.72rem;background:#FAEEDA;color:#633806;padding:1px 7px;border-radius:10px;font-weight:600">🏖 ${esc(onLeave.type.replace(' Leave',''))}</span>`
@@ -1334,11 +1343,15 @@ const netHrs = shiftHrs(s);
         const shiftLine = isSick||onLeave
           ? `<div class="list-copy" style="text-decoration:line-through;opacity:.5">${esc(s.start)} – ${esc(s.end)}</div>`
           : `<div class="list-copy">${esc(s.start)} – ${esc(s.end)} · ${netHrs.toFixed(1)}h</div>`;
+        const partialLine = partialSeg
+          ? `<div class="list-copy" style="color:#712B13">Partial leave - ${esc(partialSeg.leaveType||partialSeg.leave_type||partialSeg.status||'Leave')}: ${esc(partialSeg.start||'')}–${esc(partialSeg.end||'')}</div>`
+          : '';
         return `<div class="card list-card" style="gap:10px">
           <div style="width:34px;height:34px;border-radius:50%;background:${col.color}22;color:${col.color};display:flex;align-items:center;justify-content:center;font-size:.75rem;font-weight:700;flex-shrink:0">${esc(initials)}</div>
           <div style="flex:1;min-width:0">
             <div class="list-title" style="font-size:.9rem">${esc(col.first)} ${esc(col.last)}</div>
             ${shiftLine}
+            ${partialLine}
           </div>
           ${statusBadge}
         </div>`;
@@ -1714,7 +1727,8 @@ function renderRoster() {
   const we       = addDays(ws,6);
   const td       = today();
 
-  const myShifts = getList('shifts').filter(s=>isMyEmpId_(s.empId)&&s.published);
+  const myShifts = getList('shifts').filter(s=>isMyEmpId_(s.empId)&&s.published&&!(s.entryType==='leave'||s.entry_type==='leave'));
+  const myPartialLeaves = getList('shifts').filter(s=>isMyEmpId_(s.empId)&&s.published&&(s.entryType==='leave'||s.entry_type==='leave'));
   const mySick   = getList('sickDays').filter(s=>isMyEmpId_(s.empId));
   const myLeaves = getList('leaveRequests').filter(l=>isMyEmpId_(l.empId)&&l.status==='approved');
   const wkTot    = myShifts.filter(s=>s.date>=ws&&s.date<=we).reduce((t,s)=>t+shiftHrs(s),0);
@@ -1724,6 +1738,7 @@ function renderRoster() {
     return {
       ds,
       myShift: myShifts.find(s=>s.date===ds),
+      myPartialLeave: myPartialLeaves.find(s=>s.date===ds),
       mySick:  mySick.find(s=>s.date===ds),
       myLeave: myLeaves.find(l=>l.from<=ds&&l.to>=ds),
       isToday: ds===td
@@ -1750,15 +1765,11 @@ function renderRoster() {
 
 let myStatus='Off', myTime='', chipStyle='';
 
-if (d.mySick) {
-  myStatus='Sick';
-  chipStyle='background:#FCEBEB;color:#791F1F;';
-
-} else if (d.myLeave) {
-  myStatus=(d.myLeave.type || 'Leave').replace(' Leave','');
-  chipStyle='background:#FAEEDA;color:#633806;';
-
-} else if (d.myShift) {
+// A remaining working shift (even one shortened by a partial leave/sick
+// segment) takes priority — a same-day sick/leave record must not hide the
+// hours actually worked, only the mySick/myLeave-with-no-shift case should
+// show the full-day banner instead.
+if (d.myShift) {
   const otAnnotations = Array.isArray(d.myShift.otAnnotations)
     ? d.myShift.otAnnotations
     : [];
@@ -1773,6 +1784,21 @@ if (d.mySick) {
     : '';
 
   chipStyle='background:#EEEDFE;color:#534AB7;';
+
+  if (d.myPartialLeave) {
+    d.otDesc = (d.otDesc || '') +
+      '<div style="font-size:.72rem;color:#712B13;margin-top:4px">Partial leave - ' +
+      esc(d.myPartialLeave.leaveType || d.myPartialLeave.leave_type || d.myPartialLeave.status || 'Leave') +
+      ': ' + esc(d.myPartialLeave.start || '') + '–' + esc(d.myPartialLeave.end || '') + '</div>';
+  }
+
+} else if (d.mySick) {
+  myStatus='Sick';
+  chipStyle='background:#FCEBEB;color:#791F1F;';
+
+} else if (d.myLeave) {
+  myStatus=(d.myLeave.type || 'Leave').replace(' Leave','');
+  chipStyle='background:#FAEEDA;color:#633806;';
 }
 
         // Count total staff on this day (for the badge)
@@ -1823,10 +1849,16 @@ window.openDayRoster = function(ds) {
   const allStaff  = getList('staff').sort((a,b)=>(a.first||'').localeCompare(b.first||''));
   // published may be boolean true, string "true", or 1 — accept all
   const isPublished = s => s.published===true||s.published==='true'||s.published===1;
-  const allShifts = getList('shifts').filter(s=>{
+  const isLeaveEntry = s => s.entryType==='leave'||s.entry_type==='leave';
+  const allShiftsRaw = getList('shifts').filter(s=>{
     const d = cleanDate_(s.date||'');
     return d===ds && isPublished(s);
   });
+  // Partial leave/sick segments are their own shift rows (entryType 'leave')
+  // separate from any remaining working portion — they must never be
+  // conflated with a real shift when deciding what to strike through.
+  const allShifts = allShiftsRaw.filter(s=>!isLeaveEntry(s));
+  const allLeaveSegments = allShiftsRaw.filter(isLeaveEntry);
   const allSick   = getList('sickDays').filter(s=>cleanDate_(s.date||'')===ds);
   const allLeaves = getList('leaveRequests').filter(l=>l.status==='approved'&&l.from<=ds&&l.to>=ds);
 
@@ -1838,36 +1870,58 @@ window.openDayRoster = function(ds) {
   const seen = {};
   const rows = [];
 
-  // Staff with shifts first (sorted by start time)
+  // Staff with a real working shift first (sorted by start time) — a partial
+  // leave/sick segment on the same day annotates the row, it never strikes
+  // out hours that were actually worked.
   allShifts.slice().sort((a,b)=>(a.start||"").localeCompare(b.start||"")).forEach(s=>{
     const col     = allStaff.find(x=>normaliseId_(x.id)===normaliseId_(s.empId));
     if (!col) return;
     seen[s.empId] = true;
-    const isSick  = allSick.some(sk=>sk.empId===s.empId);
-    const onLeave = allLeaves.find(l=>l.empId===s.empId);
+    const partialSeg = allLeaveSegments.find(seg=>seg.empId===s.empId);
+    const isSick  = !partialSeg && allSick.some(sk=>sk.empId===s.empId);
+    const onLeave = !partialSeg && allLeaves.find(l=>l.empId===s.empId);
 const netH = shiftHrs(s).toFixed(1);
     const ini     = ((col.first||'')[0]||'')+((col.last||'')[0]||'');
-    rows.push({col, s, isSick, onLeave, netH, ini, type:'shift'});
+    rows.push({col, s, isSick, onLeave, partialSeg, netH, ini, type:'shift'});
   });
 
-  // Then leave-only (no shift that day)
+  // Leave/sick segments whose entire original shift was consumed (no working
+  // portion remains) — show as a leave row using the segment's own times.
+  allLeaveSegments.forEach(seg=>{
+    if (seen[seg.empId]) return;
+    const col = allStaff.find(x=>normaliseId_(x.id)===normaliseId_(seg.empId));
+    if (!col) return;
+    seen[seg.empId] = true;
+    const ini = ((col.first||'')[0]||'')+((col.last||'')[0]||'');
+    rows.push({col, s:null, isSick:false, onLeave:null, partialSeg:seg, netH:'0', ini, type:'leave'});
+  });
+
+  // Then leave-only (no shift, no leave segment, that day)
   allLeaves.forEach(l=>{
     if (seen[l.empId]) return;
     const col = allStaff.find(x=>normaliseId_(x.id)===normaliseId_(l.empId));
     if (!col) return;
     const ini = ((col.first||'')[0]||'')+((col.last||'')[0]||'');
-    rows.push({col, s:null, isSick:false, onLeave:l, netH:'0', ini, type:'leave'});
+    rows.push({col, s:null, isSick:false, onLeave:l, partialSeg:null, netH:'0', ini, type:'leave'});
   });
 
   const rowsHTML = rows.length ? rows.map(r=>{
-    const badge = r.isSick
+    const partialNote = r.partialSeg
+      ? `<div style="font-size:.72rem;color:#712B13;margin-top:2px">Partial leave - ${esc(r.partialSeg.leaveType||r.partialSeg.leave_type||r.partialSeg.status||'Leave')}: ${esc(r.partialSeg.start||'')}–${esc(r.partialSeg.end||'')}</div>`
+      : '';
+
+    const badge = r.partialSeg
+      ? ''
+      : r.isSick
       ? `<span style="font-size:.72rem;background:#FCEBEB;color:#791F1F;padding:2px 9px;border-radius:10px;font-weight:600;flex-shrink:0">🤒 Sick</span>`
       : r.onLeave
       ? `<span style="font-size:.72rem;background:#FAEEDA;color:#633806;padding:2px 9px;border-radius:10px;font-weight:600;flex-shrink:0">🏖 ${esc((r.onLeave.type||'').replace(' Leave',''))}</span>`
       : '';
 
     const timeRow = r.type==='leave'
-      ? `<div style="font-size:.78rem;color:#58584e">On leave all day</div>`
+      ? (r.partialSeg
+          ? `<div style="font-size:.78rem;color:#58584e">Off all day</div>`
+          : `<div style="font-size:.78rem;color:#58584e">On leave all day</div>`)
       : r.isSick||r.onLeave
       ? `<div style="font-size:.78rem;color:#58584e;text-decoration:line-through;opacity:.5">${esc(r.s.start)} – ${esc(r.s.end)}</div>`
       : `<div style="font-size:.78rem;color:#58584e">${esc(r.s.start)} – ${esc(r.s.end)} · ${r.netH}h</div>`;
@@ -1878,6 +1932,7 @@ const netH = shiftHrs(s).toFixed(1);
         <div style="font-size:.9rem;font-weight:600;color:#181816">${esc(r.col.first)} ${esc(r.col.last)}</div>
         <div style="font-size:.72rem;color:#98988f">${esc(r.col.role||'')}</div>
         ${timeRow}
+        ${partialNote}
       </div>
       ${badge}
     </div>`;
@@ -3598,7 +3653,7 @@ window.saveAvailability = async function() {
 // ── HOURS ──────────────────────────────────────────────────────
 function renderHours() {
   const emp    = state.emp;
-  const shifts = getList('shifts').filter(s=>isMyEmpId_(s.empId)&&s.published);
+  const shifts = getList('shifts').filter(s=>isMyEmpId_(s.empId)&&s.published&&!(s.entryType==='leave'||s.entry_type==='leave'));
   const td     = today();
   const ws     = weekStart(0), we=addDays(ws,6);
   const now    = new Date();

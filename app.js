@@ -154,7 +154,8 @@ async function getAllData() {
     meetingNotes,
     meetingNoteAcks,
     meetingNoteComments,
-    calendarEvents
+    calendarEvents,
+    publicHolidays
   ] = await Promise.all([
     fetchAllRows_('staff', query =>
       query.order('id', { ascending: true })
@@ -212,6 +213,9 @@ async function getAllData() {
       .catch(err => ({ data: [], error: err })),
 
     fetchAllRows_('calendar_events', query => query.order('date', { ascending: true }))
+      .catch(err => ({ data: [], error: err })),
+
+    fetchAllRows_('public_holidays', query => query.order('date', { ascending: true }))
       .catch(err => ({ data: [], error: err }))
   ]);
 
@@ -234,7 +238,8 @@ async function getAllData() {
     meetingNotes,
     meetingNoteAcks,
     meetingNoteComments,
-    calendarEvents
+    calendarEvents,
+    publicHolidays
   };
 
   Object.entries(optionalResults).forEach(([name, result]) => {
@@ -371,6 +376,11 @@ async function getAllData() {
     staffIds: e.staff_ids || []
   }));
 
+  const mappedPublicHolidays = (publicHolidays.data || []).map(h => ({
+    ...h,
+    staffIds: h.staff_ids || []
+  }));
+
   console.log('Staff Portal data loaded:', {
     staff: staff.data?.length || 0,
     shifts: mappedShifts.length,
@@ -402,7 +412,8 @@ async function getAllData() {
       rx3_meetingNotes: JSON.stringify(mappedMeetingNotes),
       rx3_meetingNoteAcks: JSON.stringify(mappedMeetingNoteAcks),
       rx3_meetingNoteComments: JSON.stringify(mappedMeetingNoteComments),
-      rx3_calendarEvents: JSON.stringify(mappedCalendarEvents)
+      rx3_calendarEvents: JSON.stringify(mappedCalendarEvents),
+      rx3_publicHolidays: JSON.stringify(mappedPublicHolidays)
     }
   };
 }
@@ -1018,6 +1029,8 @@ const outstandingMC = sick.find(s =>
   const todayPartialLeaves = partialLeaves.filter(s=>s.date===td);
   const todaySick  = sick.find(s=>s.date===td);
   const todayLeave = leaves.find(l=>l.status==='approved'&&l.from<=td&&l.to>=td);
+  const todayHoliday = getList('publicHolidays').find(h=>h.date===td);
+  const isGrantedHoliday = !!(todayHoliday && (todayHoliday.staffIds||[]).map(String).includes(String(emp.id)));
 
   // ── BREAK TRACKING ─────────────────────────────────────────────
   // Sort all clock events by ts (falling back to time string) so ordering is reliable
@@ -1208,9 +1221,18 @@ const h = shiftHrs(todayShift);
     todayCard=`<div class="card card-compact" style="border-color:rgba(163,45,45,.25);background:rgba(163,45,45,.06)"><span style="font-weight:600;color:#A32D2D">🤒 Sick day recorded today</span></div>`;
   } else if (todayLeave) {
     todayCard=`<div class="card card-compact" style="border-color:rgba(15,110,86,.2);background:rgba(15,110,86,.06)"><span style="font-weight:600;color:#0F6E56">🏖 On approved leave today</span></div>`;
+  } else if (isGrantedHoliday) {
+    todayCard=`<div class="card card-compact" style="border-color:rgba(24,95,165,.25);background:rgba(24,95,165,.06)"><span style="font-weight:600;color:#0C447C">🎉 Public holiday - paid leave: ${esc(todayHoliday.name)}</span></div>`;
   } else {
     todayCard=`<div class="card card-compact"><span class="helper-note">No shift scheduled today.</span></div>`;
   }
+
+  // A public holiday is worth flagging to every staff member, whether or not
+  // they've been granted leave for it (e.g. so a casual rostered on knows to
+  // expect it) — shown separately from the main status card above.
+  const holidayBanner = (todayHoliday && !isGrantedHoliday)
+    ? `<div class="card card-compact" style="margin-top:8px;border-color:rgba(24,95,165,.2);background:rgba(24,95,165,.05)"><span style="font-weight:600;color:#0C447C;font-size:.85rem">🎉 Today is a public holiday: ${esc(todayHoliday.name)}</span></div>`
+    : '';
 
   // ── ANNOUNCEMENTS ──────────────────────────────────────────
   // Home shows the soonest few as a teaser; the dedicated Announcements page
@@ -1396,6 +1418,7 @@ const netHrs = shiftHrs(s);
       </div>
     </div>
 ${todayCard}
+${holidayBanner}
 ${pendingOTSection}
 ${(typeof chatBadgeCount_ === 'function' && chatBadgeCount_() > 0) ? `
   <div class="card" style="margin:14px 0;padding:16px 18px;border:1px solid rgba(83,74,183,.25);background:#f4f2ff;border-radius:18px;display:flex;align-items:center;justify-content:space-between;gap:12px;cursor:pointer" onclick="window.nav('chat')">
@@ -1731,16 +1754,20 @@ function renderRoster() {
   const myPartialLeaves = getList('shifts').filter(s=>isMyEmpId_(s.empId)&&s.published&&(s.entryType==='leave'||s.entry_type==='leave'));
   const mySick   = getList('sickDays').filter(s=>isMyEmpId_(s.empId));
   const myLeaves = getList('leaveRequests').filter(l=>isMyEmpId_(l.empId)&&l.status==='approved');
+  const myHolidays = getList('publicHolidays');
   const wkTot    = myShifts.filter(s=>s.date>=ws&&s.date<=we).reduce((t,s)=>t+shiftHrs(s),0);
 
   const days = Array.from({length:7},(_,i)=>{
     const ds = addDays(ws,i);
+    const hol = myHolidays.find(h=>h.date===ds);
     return {
       ds,
       myShift: myShifts.find(s=>s.date===ds),
       myPartialLeave: myPartialLeaves.find(s=>s.date===ds),
       mySick:  mySick.find(s=>s.date===ds),
       myLeave: myLeaves.find(l=>l.from<=ds&&l.to>=ds),
+      holiday: hol,
+      grantedHoliday: hol && (hol.staffIds||[]).map(String).includes(String(state.emp.id)) ? hol : null,
       isToday: ds===td
     };
   });
@@ -1799,6 +1826,15 @@ if (d.myShift) {
 } else if (d.myLeave) {
   myStatus=(d.myLeave.type || 'Leave').replace(' Leave','');
   chipStyle='background:#FAEEDA;color:#633806;';
+
+} else if (d.grantedHoliday) {
+  myStatus='Public holiday';
+  chipStyle='background:#E6F1FB;color:#0C447C;';
+}
+
+if (d.holiday && !d.myShift) {
+  d.otDesc = (d.otDesc || '') +
+    '<div style="font-size:.72rem;color:#0C447C;margin-top:4px">🎉 ' + esc(d.holiday.name) + '</div>';
 }
 
         // Count total staff on this day (for the badge)
@@ -1905,12 +1941,28 @@ const netH = shiftHrs(s).toFixed(1);
     rows.push({col, s:null, isSick:false, onLeave:l, partialSeg:null, netH:'0', ini, type:'leave'});
   });
 
+  // Then anyone granted public holiday leave for this date who has neither a
+  // shift nor any other leave/sick record.
+  const holiday = getList('publicHolidays').find(h=>h.date===ds);
+  if (holiday) {
+    (holiday.staffIds||[]).forEach(empId=>{
+      if (seen[empId]) return;
+      const col = allStaff.find(x=>normaliseId_(x.id)===normaliseId_(empId));
+      if (!col) return;
+      seen[empId] = true;
+      const ini = ((col.first||'')[0]||'')+((col.last||'')[0]||'');
+      rows.push({col, s:null, isSick:false, onLeave:null, partialSeg:null, holidayGrant:holiday, netH:'0', ini, type:'holiday'});
+    });
+  }
+
   const rowsHTML = rows.length ? rows.map(r=>{
     const partialNote = r.partialSeg
       ? `<div style="font-size:.72rem;color:#712B13;margin-top:2px">Partial leave - ${esc(r.partialSeg.leaveType||r.partialSeg.leave_type||r.partialSeg.status||'Leave')}: ${esc(r.partialSeg.start||'')}–${esc(r.partialSeg.end||'')}</div>`
       : '';
 
-    const badge = r.partialSeg
+    const badge = r.type==='holiday'
+      ? `<span style="font-size:.72rem;background:#E6F1FB;color:#0C447C;padding:2px 9px;border-radius:10px;font-weight:600;flex-shrink:0">🎉 Public holiday</span>`
+      : r.partialSeg
       ? ''
       : r.isSick
       ? `<span style="font-size:.72rem;background:#FCEBEB;color:#791F1F;padding:2px 9px;border-radius:10px;font-weight:600;flex-shrink:0">🤒 Sick</span>`
@@ -1918,7 +1970,9 @@ const netH = shiftHrs(s).toFixed(1);
       ? `<span style="font-size:.72rem;background:#FAEEDA;color:#633806;padding:2px 9px;border-radius:10px;font-weight:600;flex-shrink:0">🏖 ${esc((r.onLeave.type||'').replace(' Leave',''))}</span>`
       : '';
 
-    const timeRow = r.type==='leave'
+    const timeRow = r.type==='holiday'
+      ? `<div style="font-size:.78rem;color:#58584e">Public holiday - paid leave</div>`
+      : r.type==='leave'
       ? (r.partialSeg
           ? `<div style="font-size:.78rem;color:#58584e">Off all day</div>`
           : `<div style="font-size:.78rem;color:#58584e">On leave all day</div>`)
@@ -1953,6 +2007,7 @@ const netH = shiftHrs(s).toFixed(1);
         <div>
           <div style="font-size:1.1rem;font-weight:700;color:#181816">${esc(dayFull)}</div>
           <div style="font-size:.82rem;color:#98988f;margin-top:2px">${rows.length} staff scheduled</div>
+          ${holiday?`<div style="font-size:.78rem;font-weight:600;color:#0C447C;margin-top:4px">🎉 Public holiday - ${esc(holiday.name)}</div>`:''}
         </div>
         <button onclick="document.getElementById('day-roster-popup').remove()" style="width:32px;height:32px;border-radius:50%;background:rgba(24,24,22,.07);border:none;font-size:16px;cursor:pointer;color:#58584e;flex-shrink:0">✕</button>
       </div>

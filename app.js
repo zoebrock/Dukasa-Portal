@@ -3951,14 +3951,51 @@ function renderAnnouncementsPage() {
 }
 
 // ── UNIFORM ORDERS ───────────────────────────────────────────────
+// Manufacturer size guides (chest/waist/hips, cm) — shown to staff via the
+// "Size guide" link on each catalog card so they can check sizing before
+// ordering instead of guessing.
+const SIZE_CHARTS = {
+  scrubs: {
+    label: "Scrub Top & Scrub Pants",
+    head: ['Size','Chest','Waist','Hips'],
+    rows: [
+      ['2XS','79 – 82','70 – 72','88 – 90'],
+      ['XS','85 – 87','74 – 76','93 – 95'],
+      ['S','90 – 92','78 – 80','98 – 100'],
+      ['M','95 – 97','82 – 84','103 – 105'],
+      ['L','100 – 102','86 – 88','108 – 110'],
+      ['XL','104 – 109','90 – 92','113 – 115'],
+      ['2X','112 – 117','94 – 96','118 – 120'],
+      ['3X','121 – 124','98 – 100','123 – 125'],
+      ['4X','126 – 130','102 – 104','128 – 130'],
+      ['5X','131 – 135','106 – 108','133 – 135']
+    ]
+  },
+  outer: {
+    label: "Jumpers & Lab Coat",
+    head: ['Size','Chest','Waist','Hips'],
+    rows: [
+      ['S','96 – 98','76 – 81','96 – 98'],
+      ['M','101 – 103','80 – 86','101 – 103'],
+      ['L','106 – 108','84 – 90','106 – 108'],
+      ['XL','114 – 117','88 – 94','111 – 113'],
+      ['2X','119 – 122','92 – 98','116 – 118'],
+      ['3X','126 – 130','96 – 102','121 – 123'],
+      ['4X','132 – 137','100 – 106','126 – 128'],
+      ['5X','139 – 143','104 – 110','131 – 133']
+    ]
+  }
+};
+
 const UNIFORM_CATALOG = [
-  { key:'scrubTop', name:'Scrub Top', price:70,
+  { key:'scrubTop', name:'Scrub Top', price:70, sizeChart:'scrubs',
     fitSizes:{ "Women's":['XXS','XS','S','M','L','XL','XXL','3XL','4XL','5XL'], "Men's":['S','M','L','XL','XXL','3XL','4XL','5XL'] } },
-  { key:'scrubPants', name:'Scrub Pants', price:80, styles:['Straight Leg','Jogger'],
+  { key:'scrubPants', name:'Scrub Pants', price:80, styles:['Straight Leg','Jogger'], sizeChart:'scrubs',
+    lengths:['Petite','Regular','Tall'],
     fitSizes:{ "Women's":['XXS','XS','S','M','L','XL','XXL','3XL','4XL','5XL'], "Men's":['S','M','L','XL','XXL','3XL','4XL','5XL'] } },
-  { key:'winterFleece', name:'Winter Fleece Crewneck Jumper', price:70, sizes:['S','M','L','XL','XXL','3XL','4XL','5XL'] },
-  { key:'summerJumper', name:'Summer Cotton Crewneck Jumper', price:70, sizes:['S','M','L','XL','XXL','3XL','4XL'] },
-  { key:'labCoat', name:'Lab Coat', price:70, types:['Pharmacist Coat','Lab Technician Coat'], sizes:['XS','S','M','L','XL','XXL','3XL'] }
+  { key:'winterFleece', name:'Winter Fleece Crewneck Jumper', price:70, sizeChart:'outer', sizes:['S','M','L','XL','XXL','3XL','4XL','5XL'] },
+  { key:'summerJumper', name:'Summer Cotton Crewneck Jumper', price:70, sizeChart:'outer', sizes:['S','M','L','XL','XXL','3XL','4XL'] },
+  { key:'labCoat', name:'Lab Coat', price:70, types:['Pharmacist Coat','Lab Technician Coat'], sizeChart:'outer', sizes:['XS','S','M','L','XL','XXL','3XL'] }
 ];
 
 function initUniformOrderState(){
@@ -3985,6 +4022,7 @@ window.toggleUniformItem = function(key, on){
       fit: firstFit,
       style: item.styles ? item.styles[0] : undefined,
       type: item.types ? item.types[0] : undefined,
+      length: item.lengths ? item.lengths[1] : undefined,
       size: item.sizes ? item.sizes[0] : (item.fitSizes ? item.fitSizes[firstFit][0] : undefined)
     };
   } else {
@@ -4026,6 +4064,9 @@ function renderUniformCatalogCard(item){
         ${item.types ? `<select onchange="updateUniformField('${item.key}','type',this.value)" class="input" style="flex:1;min-width:150px">
           ${item.types.map(t=>`<option value="${esc(t)}" ${sel.type===t?'selected':''}>${esc(t)}</option>`).join('')}
         </select>` : ''}
+        ${item.lengths ? `<select onchange="updateUniformField('${item.key}','length',this.value)" class="input" style="flex:1;min-width:110px">
+          ${item.lengths.map(l=>`<option value="${esc(l)}" ${sel.length===l?'selected':''}>${esc(l)} leg</option>`).join('')}
+        </select>` : ''}
         <select onchange="updateUniformField('${item.key}','size',this.value)" class="input" style="flex:1;min-width:80px">
           ${sizeOptions.map(s=>`<option value="${esc(s)}" ${sel.size===s?'selected':''}>${esc(s)}</option>`).join('')}
         </select>
@@ -4042,6 +4083,7 @@ function renderUniformCatalogCard(item){
           <div class="list-title" style="font-size:.95rem">${esc(item.name)}</div>
           <div class="list-copy" style="font-size:.8rem">$${item.price} each</div>
         </div>
+        ${item.sizeChart ? `<button type="button" class="uf-size-guide-link" onclick="event.preventDefault();openSizeGuide('${item.sizeChart}')">📏 Size guide</button>` : ''}
       </label>
       ${fieldsHtml}
     </div>
@@ -4059,6 +4101,25 @@ function renderUniformPage(){
   if(!el) return;
 
   el.innerHTML = `
+    <style>
+      .uf-size-guide-link{background:none;border:none;padding:2px 0;margin:0;font-size:.76rem;font-weight:700;color:#534AB7;cursor:pointer;flex-shrink:0;white-space:nowrap}
+      .uf-size-guide-link:hover{text-decoration:underline}
+      .uf-guide-overlay{position:fixed;inset:0;background:rgba(15,15,14,.42);backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px);z-index:9998;display:flex;align-items:center;justify-content:center;padding:18px;animation:leaveFadeIn .16s ease}
+      .uf-guide-modal{width:100%;max-width:480px;max-height:min(620px,88dvh);overflow:auto;background:#fff;border-radius:20px;box-shadow:0 22px 60px rgba(0,0,0,.24);padding:20px;animation:leaveModalIn .2s cubic-bezier(.22,.8,.3,1)}
+      .uf-guide-head{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;padding-bottom:14px;border-bottom:1px solid rgba(24,24,22,.09);margin-bottom:14px}
+      .uf-guide-title{font-size:1.05rem;font-weight:800;color:#181816}
+      .uf-guide-sub{font-size:.76rem;color:#77776e;margin-top:2px}
+      .uf-guide-close{width:32px;height:32px;border-radius:50%;border:1px solid rgba(24,24,22,.12);background:#f6f6f1;font-size:20px;line-height:1;cursor:pointer;color:#58584e;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+      .uf-guide-close:hover{background:#ecebe5}
+      .uf-guide-table{width:100%;border-collapse:collapse;font-size:.82rem}
+      .uf-guide-table th{background:#534AB7;color:#fff;padding:9px 8px;text-align:center;font-weight:700}
+      .uf-guide-table td{padding:8px;text-align:center;border-bottom:1px solid rgba(24,24,22,.07)}
+      .uf-guide-table td:first-child,.uf-guide-table th:first-child{font-weight:700;background:#f6f6f1;color:#181816}
+      .uf-guide-table th:first-child{background:#4a428f}
+      .uf-guide-note{margin-top:12px;font-size:.74rem;color:#98988f;font-style:italic;text-align:center}
+      @keyframes leaveFadeIn{from{opacity:0}to{opacity:1}}
+      @keyframes leaveModalIn{from{opacity:0;transform:translateY(10px) scale(.98)}to{opacity:1;transform:none}}
+    </style>
     <div class="page-header stack">
       <button class="btn btn-secondary btn-sm" onclick="window.nav('home')" style="margin-bottom:8px">← Back</button>
       <h1 class="page-title">Order uniform</h1>
@@ -4085,6 +4146,48 @@ function renderUniformPage(){
   `;
 }
 
+window.openSizeGuide = function(chartKey){
+  const chart = SIZE_CHARTS[chartKey];
+  if(!chart) return;
+  const existing = document.getElementById('uf-guide-overlay');
+  if(existing) existing.remove();
+
+  const overlay = document.createElement('div');
+  overlay.id = 'uf-guide-overlay';
+  overlay.className = 'uf-guide-overlay';
+  overlay.setAttribute('role','dialog');
+  overlay.addEventListener('click', e => { if(e.target === overlay) closeSizeGuide(); });
+  overlay.innerHTML = `
+    <div class="uf-guide-modal">
+      <div class="uf-guide-head">
+        <div>
+          <div class="uf-guide-title">Size guide — ${esc(chart.label)}</div>
+          <div class="uf-guide-sub">Measurements in centimetres (cm)</div>
+        </div>
+        <button class="uf-guide-close" onclick="closeSizeGuide()" aria-label="Close">×</button>
+      </div>
+      <table class="uf-guide-table">
+        <thead><tr>${chart.head.map(h=>`<th>${esc(h)}</th>`).join('')}</tr></thead>
+        <tbody>${chart.rows.map(r=>`<tr>${r.map(c=>`<td>${esc(c)}</td>`).join('')}</tr>`).join('')}</tbody>
+      </table>
+      <div class="uf-guide-note">This size chart serves as a guide only.</div>
+    </div>`;
+  document.body.appendChild(overlay);
+};
+
+window.closeSizeGuide = function(){
+  document.getElementById('uf-guide-overlay')?.remove();
+};
+
+if (!window.__uniformSizeGuideEscapeBound) {
+  window.__uniformSizeGuideEscapeBound = true;
+  document.addEventListener('keydown', event => {
+    if (event.key === 'Escape' && document.getElementById('uf-guide-overlay')) {
+      closeSizeGuide();
+    }
+  });
+}
+
 window.submitUniformOrder = async function submitUniformOrder(){
   initUniformOrderState();
   const entries = Object.entries(state.uniformOrder);
@@ -4096,10 +4199,11 @@ window.submitUniformOrder = async function submitUniformOrder(){
     if(sel.type) parts.push(sel.type); else parts.push(item.name);
     if(sel.fit) parts.push(sel.fit);
     if(sel.style) parts.push(sel.style);
+    if(sel.length) parts.push(sel.length + ' Length');
     if(sel.size) parts.push('Size ' + sel.size);
     return {
       key, name: item.name, fit: sel.fit||null, style: sel.style||null,
-      type: sel.type||null, size: sel.size||null, qty: sel.qty,
+      type: sel.type||null, length: sel.length||null, size: sel.size||null, qty: sel.qty,
       unitPrice: item.price, lineTotal: uniformItemTotal(sel),
       notes: parts.join(' · '),
       // Tracks supplier fulfilment separately from invoicing/payment status —

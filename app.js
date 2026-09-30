@@ -3955,8 +3955,11 @@ function renderAnnouncementsPage() {
 // "Size guide" link on each catalog card so they can check sizing before
 // ordering instead of guessing.
 const SIZE_CHARTS = {
-  scrubs: {
-    label: "Scrub Top & Scrub Pants",
+  // Scrub Top and Scrub Pants are cut differently for Men's vs Women's fit,
+  // so each fit gets its own chart — never shown blended, so staff always
+  // check the guide that actually matches the fit they've selected.
+  scrubsWomen: {
+    label: "Scrub Top & Scrub Pants — Women's",
     head: ['Size','Chest','Waist','Hips'],
     rows: [
       ['2XS','79 – 82','70 – 72','88 – 90'],
@@ -3971,7 +3974,21 @@ const SIZE_CHARTS = {
       ['5X','131 – 135','106 – 108','133 – 135']
     ]
   },
-  outer: {
+  scrubsMen: {
+    label: "Scrub Top & Scrub Pants — Men's",
+    head: ['Size','Chest','Waist','Hips'],
+    rows: [
+      ['S','96 – 98','76 – 81','96 – 98'],
+      ['M','101 – 103','80 – 86','101 – 103'],
+      ['L','106 – 108','84 – 90','106 – 108'],
+      ['XL','114 – 117','88 – 94','111 – 113'],
+      ['2X','119 – 122','92 – 98','116 – 118'],
+      ['3X','126 – 130','96 – 102','121 – 123'],
+      ['4X','132 – 137','100 – 106','126 – 128'],
+      ['5X','139 – 143','104 – 110','131 – 133']
+    ]
+  },
+  labCoat: {
     label: "Lab Coat",
     head: ['Size','Chest','Waist','Hips'],
     rows: [
@@ -4015,14 +4032,16 @@ const SIZE_CHARTS = {
 };
 
 const UNIFORM_CATALOG = [
-  { key:'scrubTop', name:'Scrub Top', price:70, sizeChart:'scrubs',
-    fitSizes:{ "Women's":['XXS','XS','S','M','L','XL','XXL','3XL','4XL','5XL'], "Men's":['S','M','L','XL','XXL','3XL','4XL','5XL'] } },
-  { key:'scrubPants', name:'Scrub Pants', price:80, styles:['Straight Leg','Jogger'], sizeChart:'scrubs',
+  { key:'scrubTop', name:'Scrub Top', price:70,
+    fitSizes:{ "Women's":['XXS','XS','S','M','L','XL','XXL','3XL','4XL','5XL'], "Men's":['S','M','L','XL','XXL','3XL','4XL','5XL'] },
+    sizeChartByFit:{ "Women's":'scrubsWomen', "Men's":'scrubsMen' } },
+  { key:'scrubPants', name:'Scrub Pants', price:80, styles:['Straight Leg','Jogger'],
     lengths:['Petite','Regular','Tall'],
-    fitSizes:{ "Women's":['XXS','XS','S','M','L','XL','XXL','3XL','4XL','5XL'], "Men's":['S','M','L','XL','XXL','3XL','4XL','5XL'] } },
-  { key:'winterFleece', name:'Winter Fleece Crewneck Jumper', price:70, sizeChart:'fleece', sizes:['S','M','L','XL','XXL','3XL','4XL','5XL'] },
-  { key:'summerJumper', name:'Summer Cotton Crewneck Jumper', price:70, sizeChart:'jumperSpec', sizes:['S','M','L','XL','XXL','3XL','4XL'] },
-  { key:'labCoat', name:'Lab Coat', price:70, types:['Pharmacist Coat','Lab Technician Coat'], sizeChart:'outer', sizes:['XS','S','M','L','XL','XXL','3XL'] }
+    fitSizes:{ "Women's":['XXS','XS','S','M','L','XL','XXL','3XL','4XL','5XL'], "Men's":['S','M','L','XL','XXL','3XL','4XL','5XL'] },
+    sizeChartByFit:{ "Women's":'scrubsWomen', "Men's":'scrubsMen' } },
+  { key:'winterFleece', name:'Winter Fleece Crewneck Jumper', price:70, sizeChart:'fleece', unisex:true, sizes:['S','M','L','XL','XXL','3XL','4XL','5XL'] },
+  { key:'summerJumper', name:'Summer Cotton Crewneck Jumper', price:70, sizeChart:'jumperSpec', unisex:true, sizes:['S','M','L','XL','XXL','3XL','4XL'] },
+  { key:'labCoat', name:'Lab Coat', price:70, types:['Pharmacist Coat','Lab Technician Coat'], sizeChart:'labCoat', sizes:['XS','S','M','L','XL','XXL','3XL'] }
 ];
 
 function initUniformOrderState(){
@@ -4080,8 +4099,14 @@ function renderUniformCatalogCard(item){
   let fieldsHtml = '';
   if(checked){
     const sizeOptions = item.fitSizes ? item.fitSizes[sel.fit] : item.sizes;
+    // Men's and Women's Scrub Tops/Pants are cut to different measurements,
+    // so the size guide must follow whichever fit is currently selected —
+    // never a single blended chart — while unisex items (jumpers) and the
+    // Lab Coat use one fixed chart regardless of any other selection.
+    const chartKey = item.sizeChartByFit ? item.sizeChartByFit[sel.fit] : item.sizeChart;
+    const guideLabel = item.sizeChartByFit ? `📏 Size guide (${sel.fit})` : '📏 Size guide';
     fieldsHtml = `
-      <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px">
+      <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;align-items:center">
         ${item.fitSizes ? `<select onchange="updateUniformField('${item.key}','fit',this.value)" class="input" style="flex:1;min-width:100px">
           ${Object.keys(item.fitSizes).map(f=>`<option value="${esc(f)}" ${sel.fit===f?'selected':''}>${esc(f)}</option>`).join('')}
         </select>` : ''}
@@ -4099,7 +4124,10 @@ function renderUniformCatalogCard(item){
         </select>
         <input type="number" min="1" value="${sel.qty}" oninput="updateUniformField('${item.key}','qty',this.value)" class="input" style="width:64px;flex:0 0 64px">
       </div>
-      <div style="margin-top:8px;font-size:.85rem;color:#534AB7;font-weight:700">$${uniformItemTotal(sel).toFixed(2)}</div>
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:8px">
+        <div style="font-size:.85rem;color:#534AB7;font-weight:700">$${uniformItemTotal(sel).toFixed(2)}</div>
+        ${chartKey ? `<button type="button" class="uf-size-guide-link" onclick="event.preventDefault();openSizeGuide('${chartKey}')">${esc(guideLabel)}</button>` : ''}
+      </div>
     `;
   }
   return `
@@ -4108,9 +4136,8 @@ function renderUniformCatalogCard(item){
         <input type="checkbox" ${checked?'checked':''} onchange="toggleUniformItem('${item.key}',this.checked)" style="width:20px;height:20px;flex-shrink:0;accent-color:#534AB7">
         <div style="flex:1">
           <div class="list-title" style="font-size:.95rem">${esc(item.name)}</div>
-          <div class="list-copy" style="font-size:.8rem">$${item.price} each</div>
+          <div class="list-copy" style="font-size:.8rem">$${item.price} each${item.unisex?' · Unisex fit':''}</div>
         </div>
-        ${item.sizeChart ? `<button type="button" class="uf-size-guide-link" onclick="event.preventDefault();openSizeGuide('${item.sizeChart}')">📏 Size guide</button>` : ''}
       </label>
       ${fieldsHtml}
     </div>

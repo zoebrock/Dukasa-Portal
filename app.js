@@ -3972,7 +3972,7 @@ const SIZE_CHARTS = {
     ]
   },
   outer: {
-    label: "Jumpers & Lab Coat",
+    label: "Lab Coat",
     head: ['Size','Chest','Waist','Hips'],
     rows: [
       ['S','96 – 98','76 – 81','96 – 98'],
@@ -3984,6 +3984,33 @@ const SIZE_CHARTS = {
       ['4X','132 – 137','100 – 106','126 – 128'],
       ['5X','139 – 143','104 – 110','131 – 133']
     ]
+  },
+  fleece: {
+    label: "Winter Fleece Crewneck Jumper (FL01)",
+    head: ['Size','Half Chest','Body Length'],
+    rows: [
+      ['S','60','72'],
+      ['M','62.5','74'],
+      ['L','65','76'],
+      ['XL','67.5','78'],
+      ['2XL','70','80'],
+      ['3XL','72.5','82'],
+      ['4XL','75','84'],
+      ['5XL','77.5','86']
+    ]
+  },
+  jumperSpec: {
+    label: "Summer Cotton Crewneck Jumper",
+    head: ['Size','Width (A)','Length (B)','Sleeve, centre back (D2)'],
+    rows: [
+      ['S','51','71','86'],
+      ['M','56','74','89'],
+      ['L','61','76','91'],
+      ['XL','66','79','94'],
+      ['2XL','71','81','97'],
+      ['3XL','76','84','99'],
+      ['4XL','81','86','102']
+    ]
   }
 };
 
@@ -3993,8 +4020,8 @@ const UNIFORM_CATALOG = [
   { key:'scrubPants', name:'Scrub Pants', price:80, styles:['Straight Leg','Jogger'], sizeChart:'scrubs',
     lengths:['Petite','Regular','Tall'],
     fitSizes:{ "Women's":['XXS','XS','S','M','L','XL','XXL','3XL','4XL','5XL'], "Men's":['S','M','L','XL','XXL','3XL','4XL','5XL'] } },
-  { key:'winterFleece', name:'Winter Fleece Crewneck Jumper', price:70, sizeChart:'outer', sizes:['S','M','L','XL','XXL','3XL','4XL','5XL'] },
-  { key:'summerJumper', name:'Summer Cotton Crewneck Jumper', price:70, sizeChart:'outer', sizes:['S','M','L','XL','XXL','3XL','4XL'] },
+  { key:'winterFleece', name:'Winter Fleece Crewneck Jumper', price:70, sizeChart:'fleece', sizes:['S','M','L','XL','XXL','3XL','4XL','5XL'] },
+  { key:'summerJumper', name:'Summer Cotton Crewneck Jumper', price:70, sizeChart:'jumperSpec', sizes:['S','M','L','XL','XXL','3XL','4XL'] },
   { key:'labCoat', name:'Lab Coat', price:70, types:['Pharmacist Coat','Lab Technician Coat'], sizeChart:'outer', sizes:['XS','S','M','L','XL','XXL','3XL'] }
 ];
 

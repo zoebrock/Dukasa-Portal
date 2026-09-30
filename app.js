@@ -1463,7 +1463,7 @@ ${outstandingMC ? `
     <div style="font-size:14px;color:#585854;margin-bottom:12px">
       You were marked as sick on ${esc(FDS(outstandingMC.date))}. Please upload your medical certificate when available.
     </div>
-    <button class="btn btn-primary" onclick="window.nav('leave')">Upload medical certificate</button>
+    <button class="btn btn-primary" onclick="openMC('${esc(outstandingMC.id)}','${esc(outstandingMC.date)}')">Upload medical certificate</button>
   </div>
 ` : ''}
 ${breakBanner}
@@ -2533,8 +2533,7 @@ ${hist.length?hist.map(l=>`
           </div>
           ${actionEl}
         </div>`;}).join(''):'<div class="helper-note">No sick days recorded.</div>'}
-    </div>
-    <div id="mc-wrap"></div>`;
+    </div>`;
 }
 
 window.openLeaveForm = function() {
@@ -3030,13 +3029,40 @@ if (error) throw new Error(error.message);
 // more than one file (e.g. separate certificates for separate portions of it).
 let _mcS=null, _mcD=null, _mcF=[];
 
+// Presented as a pop-up (not an inline section) so it works the same way
+// from anywhere it's triggered — the Leave page's per-day "Upload MC" button,
+// the Home page's "Medical certificate required" tile, or straight after
+// submitting a sick leave request — without forcing a page redirect/scroll.
 window.openMC = function(sickId,date) {
   _mcS=sickId; _mcD=date; _mcF=[];
-  const c=qs('#mc-wrap'); if(!c) return;
-  c.innerHTML=`
-    <div class="card" style="margin-top:12px">
-      <div style="font-family:'DM Serif Display',Georgia,serif;font-size:1.2rem;margin-bottom:4px">Upload certificate</div>
-      <div class="list-copy" style="margin-bottom:16px">For sick day: ${esc(FDS(date))} — if this is part of a consecutive run of sick days, this covers the whole run.</div>
+  const existing = document.getElementById('mc-overlay');
+  if(existing) existing.remove();
+
+  const overlay = document.createElement('div');
+  overlay.id = 'mc-overlay';
+  overlay.className = 'uf-guide-overlay';
+  overlay.setAttribute('role','dialog');
+  overlay.addEventListener('click', e => { if(e.target === overlay) closeMC(); });
+  overlay.innerHTML = `
+    <style>
+      .uf-guide-overlay{position:fixed;inset:0;background:rgba(15,15,14,.42);backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px);z-index:9998;display:flex;align-items:center;justify-content:center;padding:18px;animation:leaveFadeIn .16s ease}
+      .uf-guide-modal{width:100%;max-width:480px;max-height:min(620px,88dvh);overflow:auto;background:#fff;border-radius:20px;box-shadow:0 22px 60px rgba(0,0,0,.24);padding:20px;animation:leaveModalIn .2s cubic-bezier(.22,.8,.3,1)}
+      .uf-guide-head{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;padding-bottom:14px;border-bottom:1px solid rgba(24,24,22,.09);margin-bottom:14px}
+      .uf-guide-title{font-size:1.05rem;font-weight:800;color:#181816;font-family:'DM Serif Display',Georgia,serif}
+      .uf-guide-sub{font-size:.76rem;color:#77776e;margin-top:4px;line-height:1.4}
+      .uf-guide-close{width:32px;height:32px;border-radius:50%;border:1px solid rgba(24,24,22,.12);background:#f6f6f1;font-size:20px;line-height:1;cursor:pointer;color:#58584e;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+      .uf-guide-close:hover{background:#ecebe5}
+      @keyframes leaveFadeIn{from{opacity:0}to{opacity:1}}
+      @keyframes leaveModalIn{from{opacity:0;transform:translateY(10px) scale(.98)}to{opacity:1;transform:none}}
+    </style>
+    <div class="uf-guide-modal">
+      <div class="uf-guide-head">
+        <div>
+          <div class="uf-guide-title">Upload certificate</div>
+          <div class="uf-guide-sub">For sick day: ${esc(FDS(date))} — if this is part of a consecutive run of sick days, this covers the whole run.</div>
+        </div>
+        <button class="uf-guide-close" onclick="closeMC()" aria-label="Close">×</button>
+      </div>
       <div id="mc-drop" style="border:2px dashed rgba(24,24,22,.15);border-radius:var(--r-md);padding:24px;text-align:center;cursor:pointer;margin-bottom:14px" onclick="qs('#mc-fi').click()">
         <div style="font-size:26px;margin-bottom:6px">📎</div>
         <div style="font-size:.88rem;font-weight:600;color:#58584e">Tap to select file(s)</div>
@@ -3046,11 +3072,25 @@ window.openMC = function(sickId,date) {
       <div id="mc-st" style="display:none;font-size:.82rem;margin-bottom:12px"></div>
       <div id="mc-err" style="display:none;color:#A32D2D;font-size:.82rem;margin-bottom:10px">⚠ Please select a file first.</div>
       <div class="btn-row">
-        <button class="btn btn-secondary" style="flex:1" onclick="qs('#mc-wrap').innerHTML=''">Cancel</button>
+        <button class="btn btn-secondary" style="flex:1" onclick="closeMC()">Cancel</button>
         <button id="mc-submit-btn" class="btn btn-primary" style="flex:1" onclick="window.submitMC()">Upload certificate</button>
       </div>
     </div>`;
+  document.body.appendChild(overlay);
 };
+
+window.closeMC = function(){
+  document.getElementById('mc-overlay')?.remove();
+};
+
+if (!window.__mcEscapeBound) {
+  window.__mcEscapeBound = true;
+  document.addEventListener('keydown', event => {
+    if (event.key === 'Escape' && document.getElementById('mc-overlay')) {
+      closeMC();
+    }
+  });
+}
 
 function processMCFile_(file) {
   // Read the raw file as a data URL — used directly for non-images, and as the
@@ -3222,7 +3262,7 @@ window.submitMC = async function() {
       }
     }).catch(err => console.warn('MC email failed:', err));
 
-    if (qs('#mc-wrap')) qs('#mc-wrap').innerHTML = '';
+    closeMC();
     _mcF = [];
 
     const fresh = await getAllData();

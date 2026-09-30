@@ -3053,37 +3053,67 @@ window.openMC = function(sickId,date) {
 };
 
 function processMCFile_(file) {
+  // Read the raw file as a data URL — used directly for non-images, and as the
+  // fallback for any image the browser can't decode into a <canvas> (e.g. an
+  // unconverted iPhone HEIC photo), so a file we can't compress still uploads
+  // instead of leaving the picker hung forever.
+  const readRaw = () => new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = ev => resolve({ data: ev.target.result, name: file.name, type: file.type || 'application/octet-stream', origName: file.name });
+    r.onerror = () => reject(new Error(`Could not read "${file.name}"`));
+    r.readAsDataURL(file);
+  });
+
+  if (!file.type.startsWith('image/')) return readRaw();
+
   return new Promise(resolve => {
-    if (file.type.startsWith('image/')) {
-      const r=new FileReader(); r.onload=ev=>{
-        const img=new Image(); img.onload=()=>{
+    const r = new FileReader();
+    r.onerror = () => resolve(readRaw());
+    r.onload = ev => {
+      const img = new Image();
+      img.onerror = () => resolve(readRaw());
+      img.onload = () => {
+        try {
           const MAX=1400; let w=img.width,h=img.height;
           if(w>MAX||h>MAX){if(w>h){h=Math.round(h*MAX/w);w=MAX;}else{w=Math.round(w*MAX/h);h=MAX;}}
           const cv=document.createElement('canvas'); cv.width=w;cv.height=h;
           cv.getContext('2d').drawImage(img,0,0,w,h);
           const data=cv.toDataURL('image/jpeg',0.75);
           resolve({data,name:file.name.replace(/\.[^.]+$/,'.jpg'),type:'image/jpeg',origName:file.name});
-        }; img.src=ev.target.result;
-      }; r.readAsDataURL(file);
-    } else {
-      const r=new FileReader(); r.onload=ev=>{
-        resolve({data:ev.target.result,name:file.name,type:file.type,origName:file.name});
-      }; r.readAsDataURL(file);
-    }
+        } catch(err) {
+          resolve(readRaw());
+        }
+      };
+      img.src=ev.target.result;
+    };
+    r.readAsDataURL(file);
   });
 }
 
 window.handleMC = async function(e) {
   const files=Array.from(e.target.files||[]); if(!files.length) return;
   const st=qs('#mc-st'); if(st){st.style.display='block';st.style.color='#98988f';st.textContent='⏳ Processing...';}
-  const processed=await Promise.all(files.map(processMCFile_));
-  _mcF=processed;
-  if(st){
-    const totalKb=Math.round(processed.reduce((n,f)=>n+f.data.length,0)*.75/1024);
-    st.style.color=totalKb>3000?'#BA7517':'#0F6E56';
-    st.textContent=`✓ ${processed.length} file${processed.length>1?'s':''} ready (${totalKb}KB)`;
+  // A hard timeout guarantees the UI never gets stuck on "Processing…" —
+  // if a file genuinely can't be read within 20s, surface an error instead
+  // of leaving the upload button permanently blocked.
+  const withTimeout = p => Promise.race([
+    p,
+    new Promise((_, reject) => setTimeout(() => reject(new Error('Timed out reading file')), 20000))
+  ]);
+  try {
+    const processed = await withTimeout(Promise.all(files.map(processMCFile_)));
+    _mcF=processed;
+    if(st){
+      const totalKb=Math.round(processed.reduce((n,f)=>n+f.data.length,0)*.75/1024);
+      st.style.color=totalKb>3000?'#BA7517':'#0F6E56';
+      st.textContent=`✓ ${processed.length} file${processed.length>1?'s':''} ready (${totalKb}KB)`;
+    }
+    const drop=qs('#mc-drop'); if(drop) drop.style.borderColor='#0F6E56';
+  } catch(err) {
+    console.error('MC file processing failed:', err);
+    _mcF=[];
+    if(st){ st.style.display='block'; st.style.color='#A32D2D'; st.textContent=`⚠ Could not process file(s): ${err.message}. Please try a different photo or format.`; }
   }
-  const drop=qs('#mc-drop'); if(drop) drop.style.borderColor='#0F6E56';
 };
 
 window.submitMC = async function() {

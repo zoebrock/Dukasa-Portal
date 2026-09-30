@@ -53,6 +53,33 @@ function isMyEmpId_(value) {
   return !!id && (state.empIds || []).some(x => normaliseId_(x) === id);
 }
 
+// Contiguous run of sick days (by calendar date) that `date` belongs to, for one
+// employee — mirrors the manager portal's grouping so one certificate can cover
+// a whole run of consecutive sick days instead of needing one per day.
+function sickSpellForEmp_(sickDays, empId, date) {
+  const dates = sickDays.filter(s => s.empId === empId).map(s => s.date).sort();
+  const set = new Set(dates);
+  if (!set.has(date)) return { from: date, to: date };
+  const ymd = dt => `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')}`;
+  let from = date, to = date, d;
+  d = new Date(date + 'T00:00:00');
+  while (true) { d.setDate(d.getDate() - 1); const ds = ymd(d); if (set.has(ds)) from = ds; else break; }
+  d = new Date(date + 'T00:00:00');
+  while (true) { d.setDate(d.getDate() + 1); const ds = ymd(d); if (set.has(ds)) to = ds; else break; }
+  return { from, to };
+}
+
+// Whether any medical certificate record (an uploaded file, or a manager
+// mark of "not required"/"received elsewhere") already covers this sick day's
+// consecutive spell.
+function mcCoversSickDay_(medCerts, sickDays, sick) {
+  const spell = sickSpellForEmp_(sickDays, sick.empId, sick.date);
+  return medCerts.some(mc =>
+    mc.empId === sick.empId &&
+    mc.date >= spell.from && mc.date <= spell.to
+  );
+}
+
 // A meeting note is visible to this staff member only if they're in its
 // selected staff list, or their role matches (or it's targeted at "All Staff") —
 // same audience logic as general announcements, so targeted uploads (including
@@ -747,6 +774,9 @@ if (key === 'medCerts') {
   delete copy.file_url;
   delete copy.drive_folder_id;
   delete copy.download_url;
+
+  // Only used to name the file in the uploadMC GAS payload — not a DB column.
+  delete copy.driveFileName;
 }
 
     return copy;
@@ -1017,10 +1047,8 @@ const normalShifts = shifts.filter(s =>
     .sort((a,b)=>(a.date||"").localeCompare(b.date||""));
 
 const outstandingMC = sick.find(s =>
-  !medCerts.some(mc =>
-    mc.sickId === s.id ||
-    (mc.empId === emp.id && mc.date === s.date)
-  )
+  !medCerts.some(mc => mc.sickId === s.id) &&
+  !mcCoversSickDay_(medCerts, sick, s)
 );
   const td       = today();
   const ws       = weekStart(0);
@@ -2481,15 +2509,29 @@ ${hist.length?hist.map(l=>`
     <div class="section-label">Sick days &amp; medical certificates</div>
     <div class="info-grid">
       ${sick.length?sick.map(sk=>{
-        const mc=mcs.find(m=>m.sickId===sk.id||m.date===sk.date);
+        const spell=sickSpellForEmp_(sick,sk.empId,sk.date);
+        const mc=mcs.find(m=>m.sickId===sk.id) ||
+                 mcs.find(m=>m.empId===sk.empId&&m.date>=spell.from&&m.date<=spell.to);
+        let statusLine, actionEl;
+        if(mc && mc.fileType==='waived'){
+          statusLine=`<div class="list-copy" style="color:#58584e;font-size:.78rem">Certificate not required</div>`;
+          actionEl=`<span class="badge badge-amber">Not required</span>`;
+        }else if(mc && mc.fileType==='receivedElsewhere'){
+          statusLine=`<div class="list-copy" style="color:#0F6E56;font-size:.78rem">✓ Received via another avenue</div>`;
+          actionEl=`<span class="badge badge-green">Received</span>`;
+        }else if(mc){
+          statusLine=`<div class="list-copy" style="color:#0F6E56;font-size:.78rem">✓ Uploaded ${esc(new Date(mc.uploadedAt).toLocaleDateString('en-AU'))}</div>`;
+          actionEl=`<span class="badge badge-green">MC uploaded</span>`;
+        }else{
+          statusLine=`<div class="list-copy" style="color:#BA7517;font-size:.78rem">⚠ Medical certificate required</div>`;
+          actionEl=`<button class="btn btn-secondary btn-sm" onclick="openMC('${esc(sk.id)}','${esc(sk.date)}')">Upload MC</button>`;
+        }
         return `<div class="card list-card">
           <div>
             <div class="list-title">Sick day — ${esc(FDS(sk.date))}</div>
-            ${mc?`<div class="list-copy" style="color:#0F6E56;font-size:.78rem">✓ Uploaded ${esc(new Date(mc.uploadedAt).toLocaleDateString('en-AU'))}</div>`
-                :`<div class="list-copy" style="color:#BA7517;font-size:.78rem">⚠ Medical certificate required</div>`}
+            ${statusLine}
           </div>
-          ${mc?`<span class="badge badge-green">MC uploaded</span>`
-              :`<button class="btn btn-secondary btn-sm" onclick="openMC('${esc(sk.id)}','${esc(sk.date)}')">Upload MC</button>`}
+          ${actionEl}
         </div>`;}).join(''):'<div class="helper-note">No sick days recorded.</div>'}
     </div>
     <div id="mc-wrap"></div>`;
@@ -2984,21 +3026,23 @@ if (error) throw new Error(error.message);
 };
 
 // ── MC UPLOAD ──────────────────────────────────────────────────
-let _mcS=null, _mcD=null, _mcF=null;
+// _mcF holds an array of processed files, since one certificate spell can need
+// more than one file (e.g. separate certificates for separate portions of it).
+let _mcS=null, _mcD=null, _mcF=[];
 
 window.openMC = function(sickId,date) {
-  _mcS=sickId; _mcD=date; _mcF=null;
+  _mcS=sickId; _mcD=date; _mcF=[];
   const c=qs('#mc-wrap'); if(!c) return;
   c.innerHTML=`
     <div class="card" style="margin-top:12px">
       <div style="font-family:'DM Serif Display',Georgia,serif;font-size:1.2rem;margin-bottom:4px">Upload certificate</div>
-      <div class="list-copy" style="margin-bottom:16px">For sick day: ${esc(FDS(date))}</div>
+      <div class="list-copy" style="margin-bottom:16px">For sick day: ${esc(FDS(date))} — if this is part of a consecutive run of sick days, this covers the whole run.</div>
       <div id="mc-drop" style="border:2px dashed rgba(24,24,22,.15);border-radius:var(--r-md);padding:24px;text-align:center;cursor:pointer;margin-bottom:14px" onclick="qs('#mc-fi').click()">
         <div style="font-size:26px;margin-bottom:6px">📎</div>
-        <div style="font-size:.88rem;font-weight:600;color:#58584e">Tap to select file</div>
-        <div style="font-size:.75rem;color:#98988f;margin-top:3px">JPG or PNG recommended · PDF accepted</div>
+        <div style="font-size:.88rem;font-weight:600;color:#58584e">Tap to select file(s)</div>
+        <div style="font-size:.75rem;color:#98988f;margin-top:3px">JPG or PNG recommended · PDF accepted · multiple files allowed</div>
       </div>
-      <input type="file" id="mc-fi" accept=".pdf,.jpg,.jpeg,.png" style="display:none" onchange="handleMC(event)">
+      <input type="file" id="mc-fi" accept=".pdf,.jpg,.jpeg,.png" multiple style="display:none" onchange="handleMC(event)">
       <div id="mc-st" style="display:none;font-size:.82rem;margin-bottom:12px"></div>
       <div id="mc-err" style="display:none;color:#A32D2D;font-size:.82rem;margin-bottom:10px">⚠ Please select a file first.</div>
       <div class="btn-row">
@@ -3008,43 +3052,58 @@ window.openMC = function(sickId,date) {
     </div>`;
 };
 
-window.handleMC = function(e) {
-  const file=e.target.files[0]; if(!file) return;
+function processMCFile_(file) {
+  return new Promise(resolve => {
+    if (file.type.startsWith('image/')) {
+      const r=new FileReader(); r.onload=ev=>{
+        const img=new Image(); img.onload=()=>{
+          const MAX=1400; let w=img.width,h=img.height;
+          if(w>MAX||h>MAX){if(w>h){h=Math.round(h*MAX/w);w=MAX;}else{w=Math.round(w*MAX/h);h=MAX;}}
+          const cv=document.createElement('canvas'); cv.width=w;cv.height=h;
+          cv.getContext('2d').drawImage(img,0,0,w,h);
+          const data=cv.toDataURL('image/jpeg',0.75);
+          resolve({data,name:file.name.replace(/\.[^.]+$/,'.jpg'),type:'image/jpeg',origName:file.name});
+        }; img.src=ev.target.result;
+      }; r.readAsDataURL(file);
+    } else {
+      const r=new FileReader(); r.onload=ev=>{
+        resolve({data:ev.target.result,name:file.name,type:file.type,origName:file.name});
+      }; r.readAsDataURL(file);
+    }
+  });
+}
+
+window.handleMC = async function(e) {
+  const files=Array.from(e.target.files||[]); if(!files.length) return;
   const st=qs('#mc-st'); if(st){st.style.display='block';st.style.color='#98988f';st.textContent='⏳ Processing...';}
-  if (file.type.startsWith('image/')) {
-    const r=new FileReader(); r.onload=ev=>{
-      const img=new Image(); img.onload=()=>{
-        const MAX=1400; let w=img.width,h=img.height;
-        if(w>MAX||h>MAX){if(w>h){h=Math.round(h*MAX/w);w=MAX;}else{w=Math.round(w*MAX/h);h=MAX;}}
-        const cv=document.createElement('canvas'); cv.width=w;cv.height=h;
-        cv.getContext('2d').drawImage(img,0,0,w,h);
-        const data=cv.toDataURL('image/jpeg',0.75);
-        const kb=Math.round(data.length*.75/1024);
-        _mcF={data,name:file.name.replace(/\.[^.]+$/,'.jpg'),type:'image/jpeg'};
-        if(st){st.style.color='#0F6E56';st.textContent=`✓ ${file.name} ready (${kb}KB compressed)`;}
-        const drop=qs('#mc-drop'); if(drop) drop.style.borderColor='#0F6E56';
-      }; img.src=ev.target.result;
-    }; r.readAsDataURL(file);
-  } else {
-    const r=new FileReader(); r.onload=ev=>{
-      const kb=Math.round(ev.target.result.length*.75/1024);
-      _mcF={data:ev.target.result,name:file.name,type:file.type};
-      if(st){st.style.color=kb>1500?'#BA7517':'#0F6E56';st.textContent=`✓ ${file.name} (${kb}KB)`;}
-    }; r.readAsDataURL(file);
+  const processed=await Promise.all(files.map(processMCFile_));
+  _mcF=processed;
+  if(st){
+    const totalKb=Math.round(processed.reduce((n,f)=>n+f.data.length,0)*.75/1024);
+    st.style.color=totalKb>3000?'#BA7517':'#0F6E56';
+    st.textContent=`✓ ${processed.length} file${processed.length>1?'s':''} ready (${totalKb}KB)`;
   }
+  const drop=qs('#mc-drop'); if(drop) drop.style.borderColor='#0F6E56';
 };
 
 window.submitMC = async function() {
   const errEl = qs('#mc-err');
   const btn = qs('#mc-submit-btn');
 
-  if (!_mcF) {
+  if (!_mcF.length) {
     if (errEl) errEl.style.display = 'block';
     return;
   }
 
-  const mcId = 'mc' + Date.now();
-  const { data, name, type } = _mcF;
+  const empName = `${state.emp.first || ''} ${state.emp.last || ''}`.trim();
+  const sickDays = getList('sickDays');
+  const currentSick = sickDays.find(s => s.id === _mcS);
+  const spell = currentSick
+    ? sickSpellForEmp_(sickDays, state.emp.id, currentSick.date)
+    : { from: _mcD, to: _mcD };
+  const relatedSickDays = sickDays.filter(s => s.empId === state.emp.id && s.date >= spell.from && s.date <= spell.to);
+  const sickIds = relatedSickDays.length ? relatedSickDays.map(s => s.id) : [_mcS];
+  const dateRangeLabel = spell.from === spell.to ? FDS(spell.from) : `${FDS(spell.from)} - ${FDS(spell.to)}`;
 
   if (btn) {
     btn.disabled = true;
@@ -3054,66 +3113,68 @@ window.submitMC = async function() {
   toast('Uploading certificate...', 'info', 15000);
 
   try {
-    const r = await gasPost({
-      action: 'uploadMC',
-      mcId,
-      empId: state.emp.id,
-      empName: `${state.emp.first || ''} ${state.emp.last || ''}`.trim(),
-      date: _mcD,
-      sickId: _mcS,
-      fileName: name,
-      fileType: type,
-      data
-    });
+    const mcs = getList('medCerts');
+    const uploadedRecords = [];
 
-    const ok = r?.ok || r?.result?.ok;
-    if (!ok) throw new Error(r?.error || r?.result?.error || 'Upload failed');
+    for (let i = 0; i < _mcF.length; i++) {
+      const { data, name, type } = _mcF[i];
+      const mcId = 'mc' + Date.now() + '_' + i;
+      const ext = (name.match(/\.[^.]+$/) || [''])[0];
+      const suffix = _mcF.length > 1 ? ` (${i + 1} of ${_mcF.length})` : '';
+      const driveFileName = `Medical Certificate - ${empName} - ${dateRangeLabel}${suffix}${ext}`;
 
-    const result = r?.result || r;
+      const r = await gasPost({
+        action: 'uploadMC',
+        mcId,
+        empId: state.emp.id,
+        empName,
+        date: _mcD,
+        sickId: _mcS,
+        fileName: name,
+        driveFileName,
+        fileType: type,
+        data
+      });
 
-    const fileId = result.fileId || result.file_id || result.id || '';
-    const fileUrl = result.fileUrl || result.file_url || result.url || result.webViewLink || '';
-    const downloadUrl = result.downloadUrl || result.download_url || '';
-    const driveFolderId = result.folderId || result.driveFolderId || '1HDf6Wk7UIHl4hvaTByrUINZOqckCS_1q';
+      const ok = r?.ok || r?.result?.ok;
+      if (!ok) throw new Error(r?.error || r?.result?.error || 'Upload failed');
 
-    if (!fileId && !fileUrl) {
-      throw new Error('Upload completed, but no Google Drive file ID or URL was returned.');
+      const result = r?.result || r;
+
+      const fileId = result.fileId || result.file_id || result.id || '';
+      const fileUrl = result.fileUrl || result.file_url || result.url || result.webViewLink || '';
+      const downloadUrl = result.downloadUrl || result.download_url || '';
+      const driveFolderId = result.folderId || result.driveFolderId || '1HDf6Wk7UIHl4hvaTByrUINZOqckCS_1q';
+
+      if (!fileId && !fileUrl) {
+        throw new Error('Upload completed, but no Google Drive file ID or URL was returned.');
+      }
+
+      const record = {
+        id: mcId,
+        empId: state.emp.id,
+        date: _mcD,
+        sickId: _mcS,
+        sickDayIds: sickIds,
+        fileName: name,
+        driveFileName,
+        fileType: type,
+        fileId,
+        fileUrl,
+        downloadUrl,
+        driveFolderId,
+        uploadedAt: new Date().toISOString(),
+        managerNotified: true
+      };
+      mcs.push(record);
+      uploadedRecords.push(record);
     }
-
-    const sickDays = getList('sickDays');
-    const currentSick = sickDays.find(s => s.id === _mcS);
-    const relatedSickDays = sickDays.filter(s =>
-      s.empId === state.emp.id &&
-      currentSick &&
-      s.date >= currentSick.date &&
-      !getList('medCerts').some(mc => mc.sickId === s.id || (mc.empId === state.emp.id && mc.date === s.date))
-    );
-
-    const sickIds = relatedSickDays.length ? relatedSickDays.map(s => s.id) : [_mcS];
 
     sickDays.forEach(s => {
       if (sickIds.includes(s.id)) {
         s.mcUploaded = true;
-        s.medCertId = mcId;
+        s.medCertId = uploadedRecords[0].id;
       }
-    });
-
-    const mcs = getList('medCerts');
-
-    mcs.push({
-      id: mcId,
-      empId: state.emp.id,
-      date: _mcD,
-      sickId: _mcS,
-      sickDayIds: sickIds,
-      fileName: name,
-      fileType: type,
-      fileId,
-      fileUrl,
-      downloadUrl,
-      driveFolderId,
-      uploadedAt: new Date().toISOString(),
-      managerNotified: true
     });
 
     await saveList('sickDays', sickDays);
@@ -3124,15 +3185,15 @@ window.submitMC = async function() {
       fn: 'sendMCUploadNotification',
       payload: {
         empId: state.emp.id,
-        empName: `${state.emp.first || ''} ${state.emp.last || ''}`.trim(),
+        empName,
         date: _mcD,
-        fileName: name,
-        fileUrl
+        fileName: uploadedRecords.map(r => r.fileName).join(', '),
+        fileUrl: uploadedRecords[0].fileUrl
       }
     }).catch(err => console.warn('MC email failed:', err));
 
     if (qs('#mc-wrap')) qs('#mc-wrap').innerHTML = '';
-    _mcF = null;
+    _mcF = [];
 
     const fresh = await getAllData();
     if (fresh.ok) state.allData = fresh.data || state.allData;

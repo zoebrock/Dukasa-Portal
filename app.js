@@ -15,6 +15,11 @@ const CONFIG = {
   SESSION_VERSION: 4
 };
 
+// Who staff must confirm they've personally notified before a "Running late"
+// report is treated as lodged — the in-app/email notification is a backup,
+// not a substitute for actually telling the manager directly.
+const MANAGER_CONTACT_NAME = 'Kosta';
+
 const state = {
   currentView: 'home',
   emp: null,
@@ -2079,9 +2084,9 @@ window.openLate = function() {
         </div>
         <label style="display:flex;align-items:center;gap:12px;font-size:.9rem;font-weight:600;cursor:pointer;padding:12px 14px;background:rgba(24,24,22,.04);border-radius:var(--r-sm);border:1px solid var(--border)">
           <input type="checkbox" id="late-c" style="width:20px;height:20px;accent-color:#534AB7;cursor:pointer;flex-shrink:0">
-          I have contacted my manager
+          I have notified ${esc(MANAGER_CONTACT_NAME)} that I'm running late <span style="color:#A32D2D">*</span>
         </label>
-        <div id="late-err" style="display:none;color:#A32D2D;font-size:.82rem;padding:8px 12px;background:rgba(163,45,45,.06);border-radius:var(--r-sm)">⚠ Please fill in both the reason and estimated arrival time.</div>
+        <div id="late-err" style="display:none;color:#A32D2D;font-size:.82rem;padding:8px 12px;background:rgba(163,45,45,.06);border-radius:var(--r-sm)">⚠ Please fill in the reason and estimated arrival time, and confirm you've notified ${esc(MANAGER_CONTACT_NAME)}.</div>
         <div class="btn-row full-span" style="margin-top:4px">
           <button class="btn btn-secondary" style="flex:1" onclick="qs('#late-modal').remove()">Cancel</button>
           <button class="btn btn-primary" style="flex:1;background:#BA7517;box-shadow:0 4px 16px rgba(186,117,23,.3)" onclick="submitLate()">Notify manager</button>
@@ -2127,7 +2132,9 @@ async function saveRunningLateReport_(payload) {
 window.submitLate = async function() {
   const reason=qs('#late-r')?.value.trim(), eta=qs('#late-eta')?.value.trim(), contacted=qs('#late-c')?.checked||false;
   const errEl=qs('#late-err');
-  if (!reason||!eta){ if(errEl) errEl.style.display='block'; return; }
+  // Notifying the manager directly is mandatory — the in-app/email
+  // notification this submits is a record of that, not a replacement for it.
+  if (!reason||!eta||!contacted){ if(errEl) errEl.style.display='block'; return; }
   if (errEl) errEl.style.display='none';
 
   const td=today();

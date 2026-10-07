@@ -2168,9 +2168,14 @@ window.submitLate = async function() {
 
   try {
     // Save first so the manager portal and timesheet receive a durable record,
-    // even if the email service is temporarily delayed.
+    // even if the email service is temporarily delayed or unavailable — the
+    // saved report is what actually matters, so a failed notification email
+    // must never make this look like it failed when it didn't.
     await saveRunningLateReport_(payload);
-    await gasPost({action:'sendEmail',fn:'sendRunningLateNotification',payload});
+
+    gasPost({action:'sendEmail',fn:'sendRunningLateNotification',payload})
+      .catch(err => console.warn('Running-late notification email failed:', err.message));
+
     qs('#late-modal')?.remove();
     toast('Your manager has been notified and your timesheet has been noted. ✓','success');
   } catch(e){

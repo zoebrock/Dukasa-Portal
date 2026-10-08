@@ -187,7 +187,8 @@ async function getAllData() {
     meetingNoteAcks,
     meetingNoteComments,
     calendarEvents,
-    publicHolidays
+    publicHolidays,
+    weekendShiftRequests
   ] = await Promise.all([
     fetchAllRows_('staff', query =>
       query.order('id', { ascending: true })
@@ -248,6 +249,10 @@ async function getAllData() {
       .catch(err => ({ data: [], error: err })),
 
     fetchAllRows_('public_holidays', query => query.order('date', { ascending: true }))
+      .catch(err => ({ data: [], error: err })),
+
+    // New table — a missing/not-yet-created table must not break the rest of sync.
+    fetchAllRows_('weekend_shift_requests', query => query.order('id', { ascending: true }))
       .catch(err => ({ data: [], error: err }))
   ]);
 
@@ -271,7 +276,8 @@ async function getAllData() {
     meetingNoteAcks,
     meetingNoteComments,
     calendarEvents,
-    publicHolidays
+    publicHolidays,
+    weekendShiftRequests
   };
 
   Object.entries(optionalResults).forEach(([name, result]) => {
@@ -413,6 +419,17 @@ async function getAllData() {
     staffIds: h.staff_ids || []
   }));
 
+  const mappedWeekendShiftRequests = (weekendShiftRequests.data || []).map(r => ({
+    ...r,
+    empId: normaliseId_(r.emp_id ?? r.empId),
+    declineReason: r.decline_reason || '',
+    decidedAt: r.decided_at || null,
+    pharmacistStart: r.pharmacist_start || '',
+    pharmacistEnd: r.pharmacist_end || '',
+    createdByName: r.created_by_name || '',
+    createdAt: r.created_at
+  }));
+
   console.log('Staff Portal data loaded:', {
     staff: staff.data?.length || 0,
     shifts: mappedShifts.length,
@@ -445,7 +462,8 @@ async function getAllData() {
       rx3_meetingNoteAcks: JSON.stringify(mappedMeetingNoteAcks),
       rx3_meetingNoteComments: JSON.stringify(mappedMeetingNoteComments),
       rx3_calendarEvents: JSON.stringify(mappedCalendarEvents),
-      rx3_publicHolidays: JSON.stringify(mappedPublicHolidays)
+      rx3_publicHolidays: JSON.stringify(mappedPublicHolidays),
+      rx3_weekendShiftRequests: JSON.stringify(mappedWeekendShiftRequests)
     }
   };
 }
@@ -651,7 +669,8 @@ const tableMap = {
   leaveRequests: 'leave_requests',
   otRequests: 'ot_requests',
   sickDays: 'sick_days',
-  medCerts: 'med_certs'
+  medCerts: 'med_certs',
+  weekendShiftRequests: 'weekend_shift_requests'
 };
 
   const table = tableMap[key];
@@ -782,6 +801,25 @@ if (key === 'medCerts') {
 
   // Only used to name the file in the uploadMC GAS payload — not a DB column.
   delete copy.driveFileName;
+}
+
+if (key === 'weekendShiftRequests') {
+  copy.emp_id = copy.empId;
+  copy.decline_reason = copy.declineReason || null;
+  copy.decided_at = copy.decidedAt || null;
+  copy.pharmacist_start = copy.pharmacistStart || null;
+  copy.pharmacist_end = copy.pharmacistEnd || null;
+  copy.created_by_name = copy.createdByName || null;
+
+  delete copy.empId;
+  delete copy.declineReason;
+  delete copy.decidedAt;
+  delete copy.pharmacistStart;
+  delete copy.pharmacistEnd;
+  delete copy.createdByName;
+  delete copy.createdBy;
+  delete copy.createdByRole;
+  delete copy.createdAt;
 }
 
     return copy;
@@ -1049,6 +1087,11 @@ const normalShifts = shifts.filter(s =>
       o.approved!==true &&
       o.approved!==false
     )
+    .sort((a,b)=>(a.date||"").localeCompare(b.date||""));
+
+  // ── WEEKEND SHIFT REQUESTS AWAITING MY RESPONSE ─────────────
+  const pendingWeekendShifts = getList('weekendShiftRequests')
+    .filter(r=>isMyEmpId_(r.empId)&&r.status==='pending')
     .sort((a,b)=>(a.date||"").localeCompare(b.date||""));
 
 const outstandingMC = sick.find(s =>
@@ -1436,6 +1479,29 @@ const netHrs = shiftHrs(s);
       `).join('')}
     </div>` : '';
 
+  const pendingWeekendSection = pendingWeekendShifts.length ? `
+    <div class="section-label" style="display:flex;align-items:center;gap:6px">
+      <span>🗓️ Weekend shift requests awaiting your response</span>
+      <span style="font-size:10px;background:#534AB7;color:#fff;border-radius:10px;padding:1px 7px;font-weight:700">${pendingWeekendShifts.length}</span>
+    </div>
+    <div class="info-grid" style="margin-bottom:4px">
+      ${pendingWeekendShifts.map(r=>`
+        <div class="card list-card" style="align-items:flex-start">
+          <div style="flex:1;min-width:0">
+            <div class="list-title">${esc(FDS(r.date))} · ${esc(r.start||'')} – ${esc(r.end||'')}</div>
+            ${r.reason?`<div class="list-copy">${esc(r.reason)}</div>`:''}
+          </div>
+          <div style="display:flex;flex-direction:column;gap:7px;align-items:flex-end">
+            <span class="badge badge-amber">Awaiting your response</span>
+            <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">
+              <button class="btn btn-primary btn-sm" type="button" onclick="respondWeekendShift('${r.id}', true)">Approve</button>
+              <button class="btn btn-secondary btn-sm" type="button" onclick="respondWeekendShift('${r.id}', false)">Decline</button>
+            </div>
+          </div>
+        </div>
+      `).join('')}
+    </div>` : '';
+
   const upcoming = shifts.filter(s=>s.date>td).sort((a,b)=>(a.date||"").localeCompare(b.date||"")).slice(0,5);
   const now      = new Date();
 
@@ -1453,6 +1519,7 @@ const netHrs = shiftHrs(s);
 ${todayCard}
 ${holidayBanner}
 ${pendingOTSection}
+${pendingWeekendSection}
 ${(typeof chatBadgeCount_ === 'function' && chatBadgeCount_() > 0) ? `
   <div class="card" style="margin:14px 0;padding:16px 18px;border:1px solid rgba(83,74,183,.25);background:#f4f2ff;border-radius:18px;display:flex;align-items:center;justify-content:space-between;gap:12px;cursor:pointer" onclick="window.nav('chat')">
     <div>
@@ -3580,6 +3647,90 @@ window.respondManagerOT = async function(id, accepted) {
   } catch (e) {
     console.error('OT response failed:', e);
     toast('Could not submit OT response: ' + e.message, 'error', 6000);
+  }
+};
+
+// ── WEEKEND SHIFT REQUESTS ───────────────────────────────────────
+// Approving adds a brand-new rostered shift on the proposed day (the staff
+// member isn't normally rostered that day at all, unlike OT which extends
+// an existing shift) — published immediately since the manager already
+// confirmed a Pharmacist is rostered to cover it.
+async function applyApprovedWeekendShiftToShift(req) {
+  const staff = getList('staff');
+  const emp = staff.find(s => String(s.id) === String(req.empId));
+
+  const dbRow = {
+    id: 'sh-wknd-' + Date.now(),
+    emp_id: req.empId,
+    date: req.date,
+    start: req.start,
+    end: req.end,
+    break_min: calcBreakMin(req.start, req.end),
+    paid_break_min: 0,
+    role: emp ? emp.role : '',
+    notes: 'Weekend shift: ' + (req.reason || ''),
+    published: true,
+    status: 'published',
+    is_ot: false
+  };
+
+  const { error } = await supabase.from('shifts').upsert(dbRow, { onConflict: 'id' });
+  if (error) throw error;
+}
+
+window.respondWeekendShift = async function(id, accepted) {
+  const reqs = getList('weekendShiftRequests');
+  const req = reqs.find(r => r.id === id && String(r.empId) === String(state.emp.id));
+
+  if (!req) {
+    toast('Could not find this weekend shift request.', 'error');
+    return;
+  }
+
+  let declineReason = '';
+
+  if (!accepted) {
+    declineReason = prompt('Please provide a reason for declining this weekend shift request:') || '';
+    if (!declineReason.trim()) {
+      toast('A reason is required to decline.', 'warning');
+      return;
+    }
+  }
+
+  try {
+    const update = accepted
+      ? { status: 'approved', decided_at: new Date().toISOString(), decline_reason: null }
+      : { status: 'declined', decided_at: new Date().toISOString(), decline_reason: declineReason.trim() };
+
+    const { error } = await supabase
+      .from('weekend_shift_requests')
+      .update(update)
+      .eq('id', id)
+      .eq('emp_id', state.emp.id);
+
+    if (error) throw error;
+
+    if (accepted) {
+      await applyApprovedWeekendShiftToShift(req);
+    }
+
+    const fresh = await getAllData();
+    if (fresh.ok) state.allData = fresh.data || state.allData;
+
+    renderHome();
+    renderRoster();
+
+    toast(
+      accepted
+        ? 'Weekend shift approved and added to your roster. ✓'
+        : 'Weekend shift declined. Your manager has been notified.',
+      accepted ? 'success' : 'info',
+      5000
+    );
+
+  } catch (e) {
+    console.error('Weekend shift response failed:', e);
+    toast('Could not submit your response: ' + e.message, 'error', 6000);
   }
 };
 

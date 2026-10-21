@@ -3415,26 +3415,75 @@ window.submitMC = async function() {
 };
 
 // ── OT ─────────────────────────────────────────────────────────
+function otBadgeHTML_(o) {
+  if (o.approved === true) return `<span class="badge badge-green">Approved</span>`;
+  if (o.approved === false) return `<span class="badge badge-red">Denied</span>`;
+
+  if (
+    o.requestedBy === 'manager' &&
+    o.availConfirmed !== true &&
+    o.staffConfirmed !== false
+  ) {
+    return `<span class="badge badge-amber">Awaiting your response</span>`;
+  }
+
+  return `<span class="badge badge-amber">Pending</span>`;
+}
+
+function otRequestCardHTML_(o) {
+  const needsStaffResponse =
+    o.requestedBy === 'manager' &&
+    o.availConfirmed !== true &&
+    o.approved !== true &&
+    o.approved !== false;
+
+  return `
+    <div class="card list-card">
+      <div style="flex:1;min-width:0">
+        <div class="list-title">${esc(FDS(o.date))} · ${esc(o.start || '')} – ${esc(o.end || '')}</div>
+        ${o.reason ? `<div class="list-copy">${esc(o.reason)}</div>` : ''}
+        ${o.task ? `<div class="list-copy">Task: ${esc(o.task)}</div>` : ''}
+        ${o.staffDenialReason ? `<div class="list-copy" style="color:#A32D2D">Declined reason: ${esc(o.staffDenialReason)}</div>` : ''}
+      </div>
+
+      <div style="display:flex;flex-direction:column;gap:7px;align-items:flex-end">
+        ${otBadgeHTML_(o)}
+
+        ${needsStaffResponse ? `
+          <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">
+            <button class="btn btn-primary btn-sm" type="button" onclick="respondManagerOT('${o.id}', true)">
+              Approve
+            </button>
+            <button class="btn btn-secondary btn-sm" type="button" onclick="respondManagerOT('${o.id}', false)">
+              Decline
+            </button>
+          </div>
+        ` : ''}
+      </div>
+    </div>
+  `;
+}
+
+// "Active" = anything still needing a decision (pending, regardless of
+// date), plus anything already approved for today or tomorrow — so the
+// page stays short and relevant instead of listing every OT request ever
+// made. Everything else (older approved requests, declined/denied ones)
+// lives in the "OT History" pop-up instead.
+function isActiveOTRequest_(o, todayStr, tomorrowStr) {
+  const isPending = o.approved !== true && o.approved !== false;
+  if (isPending) return true;
+  return o.approved === true && (o.date === todayStr || o.date === tomorrowStr);
+}
+
 function renderOT() {
   const emp = state.emp;
+  const todayStr = today();
+  const tomorrowStr = addDays(todayStr, 1);
   const reqs = getList('otRequests')
     .filter(o => String(o.empId) === String(emp.id))
     .sort((a,b) => (b.date || "").localeCompare(a.date || ""));
 
-  const badge = o => {
-    if (o.approved === true) return `<span class="badge badge-green">Approved</span>`;
-    if (o.approved === false) return `<span class="badge badge-red">Denied</span>`;
-
-    if (
-      o.requestedBy === 'manager' &&
-      o.availConfirmed !== true &&
-      o.staffConfirmed !== false
-    ) {
-      return `<span class="badge badge-amber">Awaiting your response</span>`;
-    }
-
-    return `<span class="badge badge-amber">Pending</span>`;
-  };
+  const activeReqs = reqs.filter(o => isActiveOTRequest_(o, todayStr, tomorrowStr));
 
   qs('#view-ot').innerHTML = `
     <div class="page-header">
@@ -3447,41 +3496,12 @@ function renderOT() {
 
     <div id="ot-form"></div>
 
-    <div class="section-label">My OT requests</div>
+    <div class="page-header" style="margin-bottom:0">
+      <div class="section-label" style="margin:0">My OT requests</div>
+      <button class="btn btn-secondary btn-sm" type="button" onclick="openOTHistory()">OT History</button>
+    </div>
     <div class="info-grid">
-      ${reqs.length ? reqs.map(o => {
-        const needsStaffResponse =
-          o.requestedBy === 'manager' &&
-          o.availConfirmed !== true &&
-          o.approved !== true &&
-          o.approved !== false;
-
-        return `
-          <div class="card list-card">
-            <div style="flex:1;min-width:0">
-              <div class="list-title">${esc(FDS(o.date))} · ${esc(o.start || '')} – ${esc(o.end || '')}</div>
-              ${o.reason ? `<div class="list-copy">${esc(o.reason)}</div>` : ''}
-              ${o.task ? `<div class="list-copy">Task: ${esc(o.task)}</div>` : ''}
-              ${o.staffDenialReason ? `<div class="list-copy" style="color:#A32D2D">Declined reason: ${esc(o.staffDenialReason)}</div>` : ''}
-            </div>
-
-            <div style="display:flex;flex-direction:column;gap:7px;align-items:flex-end">
-              ${badge(o)}
-
-              ${needsStaffResponse ? `
-                <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">
-                  <button class="btn btn-primary btn-sm" type="button" onclick="respondManagerOT('${o.id}', true)">
-                    Approve
-                  </button>
-                  <button class="btn btn-secondary btn-sm" type="button" onclick="respondManagerOT('${o.id}', false)">
-                    Decline
-                  </button>
-                </div>
-              ` : ''}
-            </div>
-          </div>
-        `;
-      }).join('') : '<div class="helper-note">No OT requests yet.</div>'}
+      ${activeReqs.length ? activeReqs.map(otRequestCardHTML_).join('') : '<div class="helper-note">No active OT requests — pending requests and anything approved for today or tomorrow will show up here.</div>'}
     </div>
 
     <div class="page-header" style="margin-top:28px">
@@ -3498,6 +3518,65 @@ function renderOT() {
       ${renderMyShiftAdjustmentRequests_()}
     </div>
   `;
+}
+
+// Full historical OT list, shown as a pop-up rather than inline so the main
+// Overtime page doesn't force staff to scroll past every OT request ever
+// made just to reach the shift time-change section below it.
+window.openOTHistory = function() {
+  const emp = state.emp;
+  const reqs = getList('otRequests')
+    .filter(o => String(o.empId) === String(emp.id))
+    .sort((a,b) => (b.date || "").localeCompare(a.date || ""));
+
+  const existing = document.getElementById('ot-history-overlay');
+  if (existing) existing.remove();
+
+  const overlay = document.createElement('div');
+  overlay.id = 'ot-history-overlay';
+  overlay.className = 'uf-guide-overlay';
+  overlay.setAttribute('role', 'dialog');
+  overlay.setAttribute('aria-modal', 'true');
+  overlay.setAttribute('aria-label', 'OT history');
+  overlay.addEventListener('click', e => { if (e.target === overlay) closeOTHistory(); });
+  overlay.innerHTML = `
+    <style>
+      .uf-guide-overlay{position:fixed;inset:0;background:rgba(15,15,14,.42);backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px);z-index:9998;display:flex;align-items:center;justify-content:center;padding:18px;animation:leaveFadeIn .16s ease}
+      .uf-guide-modal{width:100%;max-width:480px;max-height:min(620px,88dvh);overflow:auto;background:#fff;border-radius:20px;box-shadow:0 22px 60px rgba(0,0,0,.24);padding:20px;animation:leaveModalIn .2s cubic-bezier(.22,.8,.3,1)}
+      .uf-guide-head{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;padding-bottom:14px;border-bottom:1px solid rgba(24,24,22,.09);margin-bottom:14px}
+      .uf-guide-title{font-size:1.05rem;font-weight:800;color:#181816;font-family:'DM Serif Display',Georgia,serif}
+      .uf-guide-sub{font-size:.76rem;color:#77776e;margin-top:4px;line-height:1.4}
+      .uf-guide-close{width:32px;height:32px;border-radius:50%;border:1px solid rgba(24,24,22,.12);background:#f6f6f1;font-size:20px;line-height:1;cursor:pointer;color:#58584e;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+      .uf-guide-close:hover{background:#ecebe5}
+      @keyframes leaveFadeIn{from{opacity:0}to{opacity:1}}
+      @keyframes leaveModalIn{from{opacity:0;transform:translateY(10px) scale(.98)}to{opacity:1;transform:none}}
+    </style>
+    <div class="uf-guide-modal">
+      <div class="uf-guide-head">
+        <div>
+          <div class="uf-guide-title">OT history</div>
+          <div class="uf-guide-sub">Every overtime request you've made or been sent, most recent first.</div>
+        </div>
+        <button class="uf-guide-close" onclick="closeOTHistory()" aria-label="Close">×</button>
+      </div>
+      <div class="info-grid">
+        ${reqs.length ? reqs.map(otRequestCardHTML_).join('') : '<div class="helper-note">No OT requests yet.</div>'}
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+};
+
+window.closeOTHistory = function() {
+  document.getElementById('ot-history-overlay')?.remove();
+};
+
+if (!window.__otHistoryEscapeBound) {
+  window.__otHistoryEscapeBound = true;
+  document.addEventListener('keydown', event => {
+    if (event.key === 'Escape' && document.getElementById('ot-history-overlay')) {
+      closeOTHistory();
+    }
+  });
 }
 
 function renderMyShiftAdjustmentRequests_() {

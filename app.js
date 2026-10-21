@@ -188,7 +188,8 @@ async function getAllData() {
     meetingNoteComments,
     calendarEvents,
     publicHolidays,
-    weekendShiftRequests
+    weekendShiftRequests,
+    shiftAdjustmentRequests
   ] = await Promise.all([
     fetchAllRows_('staff', query =>
       query.order('id', { ascending: true })
@@ -253,6 +254,10 @@ async function getAllData() {
 
     // New table — a missing/not-yet-created table must not break the rest of sync.
     fetchAllRows_('weekend_shift_requests', query => query.order('id', { ascending: true }))
+      .catch(err => ({ data: [], error: err })),
+
+    // New table — a missing/not-yet-created table must not break the rest of sync.
+    fetchAllRows_('shift_adjustment_requests', query => query.order('id', { ascending: true }))
       .catch(err => ({ data: [], error: err }))
   ]);
 
@@ -430,6 +435,22 @@ async function getAllData() {
     createdAt: r.created_at
   }));
 
+  const mappedShiftAdjustmentRequests = (shiftAdjustmentRequests.data || []).map(r => ({
+    ...r,
+    empId: normaliseId_(r.emp_id ?? r.empId),
+    shiftId: r.shift_id,
+    originalStart: r.original_start,
+    originalEnd: r.original_end,
+    requestedStart: r.requested_start,
+    requestedEnd: r.requested_end,
+    coverArranged: r.cover_arranged ?? false,
+    coverNotes: r.cover_notes || '',
+    denialReason: r.denial_reason || '',
+    decidedAt: r.decided_at || null,
+    decidedByName: r.decided_by_name || '',
+    createdAt: r.created_at
+  }));
+
   console.log('Staff Portal data loaded:', {
     staff: staff.data?.length || 0,
     shifts: mappedShifts.length,
@@ -463,7 +484,8 @@ async function getAllData() {
       rx3_meetingNoteComments: JSON.stringify(mappedMeetingNoteComments),
       rx3_calendarEvents: JSON.stringify(mappedCalendarEvents),
       rx3_publicHolidays: JSON.stringify(mappedPublicHolidays),
-      rx3_weekendShiftRequests: JSON.stringify(mappedWeekendShiftRequests)
+      rx3_weekendShiftRequests: JSON.stringify(mappedWeekendShiftRequests),
+      rx3_shiftAdjustmentRequests: JSON.stringify(mappedShiftAdjustmentRequests)
     }
   };
 }
@@ -670,7 +692,8 @@ const tableMap = {
   otRequests: 'ot_requests',
   sickDays: 'sick_days',
   medCerts: 'med_certs',
-  weekendShiftRequests: 'weekend_shift_requests'
+  weekendShiftRequests: 'weekend_shift_requests',
+  shiftAdjustmentRequests: 'shift_adjustment_requests'
 };
 
   const table = tableMap[key];
@@ -819,6 +842,34 @@ if (key === 'weekendShiftRequests') {
   delete copy.createdByName;
   delete copy.createdBy;
   delete copy.createdByRole;
+  delete copy.createdAt;
+}
+
+if (key === 'shiftAdjustmentRequests') {
+  copy.emp_id = copy.empId;
+  copy.shift_id = copy.shiftId ?? null;
+  copy.original_start = copy.originalStart ?? null;
+  copy.original_end = copy.originalEnd ?? null;
+  copy.requested_start = copy.requestedStart ?? null;
+  copy.requested_end = copy.requestedEnd ?? null;
+  copy.cover_arranged = copy.coverArranged ?? false;
+  copy.cover_notes = copy.coverNotes || null;
+  copy.denial_reason = copy.denialReason || null;
+  copy.decided_at = copy.decidedAt || null;
+  copy.decided_by_name = copy.decidedByName || null;
+  copy.created_at = copy.createdAt || null;
+
+  delete copy.empId;
+  delete copy.shiftId;
+  delete copy.originalStart;
+  delete copy.originalEnd;
+  delete copy.requestedStart;
+  delete copy.requestedEnd;
+  delete copy.coverArranged;
+  delete copy.coverNotes;
+  delete copy.denialReason;
+  delete copy.decidedAt;
+  delete copy.decidedByName;
   delete copy.createdAt;
 }
 
@@ -3432,7 +3483,49 @@ function renderOT() {
         `;
       }).join('') : '<div class="helper-note">No OT requests yet.</div>'}
     </div>
+
+    <div class="page-header" style="margin-top:28px">
+      <div>
+        <div class="section-label" style="margin:0">Shift time changes</div>
+        <div class="page-subtitle">Request a different start/end time for an already-rostered shift.</div>
+      </div>
+      <button class="btn btn-primary" type="button" onclick="openShiftAdjustmentForm()">+ Request a time change</button>
+    </div>
+
+    <div id="shiftadj-form"></div>
+
+    <div class="info-grid">
+      ${renderMyShiftAdjustmentRequests_()}
+    </div>
   `;
+}
+
+function renderMyShiftAdjustmentRequests_() {
+  const emp = state.emp;
+  const reqs = getList('shiftAdjustmentRequests')
+    .filter(r => String(r.empId) === String(emp.id))
+    .sort((a,b) => (b.date || "").localeCompare(a.date || ""));
+
+  if (!reqs.length) return '<div class="helper-note">No shift time change requests yet.</div>';
+
+  const badge = r => {
+    if (r.status === 'approved') return `<span class="badge badge-green">Approved</span>`;
+    if (r.status === 'denied') return `<span class="badge badge-red">Denied</span>`;
+    return `<span class="badge badge-amber">Pending</span>`;
+  };
+
+  return reqs.map(r => `
+    <div class="card list-card">
+      <div style="flex:1;min-width:0">
+        <div class="list-title">${esc(FDS(r.date))} · ${esc(r.originalStart || '?')}–${esc(r.originalEnd || '?')} → <strong>${esc(r.requestedStart || '?')}–${esc(r.requestedEnd || '?')}</strong></div>
+        ${r.reason ? `<div class="list-copy">${esc(r.reason)}</div>` : ''}
+        ${r.denialReason ? `<div class="list-copy" style="color:#A32D2D">Denied reason: ${esc(r.denialReason)}</div>` : ''}
+      </div>
+      <div style="display:flex;flex-direction:column;gap:7px;align-items:flex-end">
+        ${badge(r)}
+      </div>
+    </div>
+  `).join('');
 }
 
 // Break policy, keyed off gross (total) shift hours — mirrors the Manager
@@ -3854,6 +3947,166 @@ gasPost({
       btn.textContent = 'Submit';
     }
     toast('Could not submit OT: ' + e.message, 'error', 5000);
+  }
+};
+
+window.openShiftAdjustmentForm = function() {
+  const c = qs('#shiftadj-form');
+  if (!c) return;
+
+  const emp = state.emp;
+  const myShifts = getList('shifts')
+    .filter(s => isMyEmpId_(s.empId) && s.published && s.date >= today() && !(s.entryType === 'leave' || s.entry_type === 'leave') && !s.isOT && !s.is_ot)
+    .sort((a,b) => (a.date || '').localeCompare(b.date || '') || (a.start || '').localeCompare(b.start || ''));
+
+  if (!myShifts.length) {
+    c.innerHTML = `<div class="card" style="margin-bottom:14px"><div class="helper-note">You have no upcoming rostered shifts to change.</div></div>`;
+    return;
+  }
+
+  c.innerHTML = `
+    <div class="card" style="margin-bottom:14px">
+      <div style="font-family:'DM Serif Display',Georgia,serif;font-size:1.3rem;margin-bottom:16px">New shift time change request</div>
+
+      <div class="form-grid">
+        <div class="input-wrap full-span">
+          <label for="shiftadj-shift">Which shift?</label>
+          <select class="input" id="shiftadj-shift" onchange="updateShiftAdjustmentCurrentTimes_()">
+            ${myShifts.map(s => `<option value="${esc(s.id)}" data-start="${esc(s.start||'')}" data-end="${esc(s.end||'')}" data-date="${esc(s.date||'')}">${esc(FDS(s.date))} · ${esc(s.start||'')}–${esc(s.end||'')}</option>`).join('')}
+          </select>
+        </div>
+
+        <div class="input-wrap">
+          <label for="shiftadj-start">New start</label>
+          <input class="input" id="shiftadj-start" type="time" autocomplete="off">
+        </div>
+
+        <div class="input-wrap">
+          <label for="shiftadj-end">New end</label>
+          <input class="input" id="shiftadj-end" type="time" autocomplete="off">
+        </div>
+
+        <div class="input-wrap full-span">
+          <label for="shiftadj-reason">Reason</label>
+          <textarea class="textarea" id="shiftadj-reason" placeholder="Why do you need this time change?"></textarea>
+        </div>
+
+        <div class="input-wrap full-span" style="display:flex;align-items:flex-start;gap:8px">
+          <input type="checkbox" id="shiftadj-cover" style="margin-top:3px">
+          <label for="shiftadj-cover" style="font-weight:400">I've organised cover with the team members affected by this change</label>
+        </div>
+
+        <div class="input-wrap full-span">
+          <label for="shiftadj-cover-notes">Who's covering? (optional)</label>
+          <input class="input" id="shiftadj-cover-notes" type="text" placeholder="e.g. Sam is covering 8am-9am">
+        </div>
+
+        <div id="shiftadj-err" style="display:none;color:#A32D2D;font-size:.82rem" class="full-span">
+          ⚠ Please choose new times, give a reason, and confirm cover has been organised.
+        </div>
+
+        <div class="btn-row full-span">
+          <button type="button" class="btn btn-secondary" onclick="qs('#shiftadj-form').innerHTML=''">Cancel</button>
+          <button type="button" class="btn btn-primary" id="shiftadj-submit" onclick="submitShiftAdjustment()">Submit</button>
+        </div>
+      </div>
+    </div>
+  `;
+};
+
+function updateShiftAdjustmentCurrentTimes_() {
+  const sel = qs('#shiftadj-shift');
+  const opt = sel?.selectedOptions?.[0];
+  if (!opt) return;
+  if (qs('#shiftadj-start')) qs('#shiftadj-start').value = opt.dataset.start || '';
+  if (qs('#shiftadj-end')) qs('#shiftadj-end').value = opt.dataset.end || '';
+}
+
+window.submitShiftAdjustment = async function() {
+  const sel = qs('#shiftadj-shift');
+  const opt = sel?.selectedOptions?.[0];
+  const shiftId = sel?.value || '';
+  const date = opt?.dataset.date || '';
+  const originalStart = opt?.dataset.start || '';
+  const originalEnd = opt?.dataset.end || '';
+  const requestedStart = qs('#shiftadj-start')?.value || '';
+  const requestedEnd = qs('#shiftadj-end')?.value || '';
+  const reason = (qs('#shiftadj-reason')?.value || '').trim();
+  const coverArranged = !!qs('#shiftadj-cover')?.checked;
+  const coverNotes = (qs('#shiftadj-cover-notes')?.value || '').trim();
+
+  const errEl = qs('#shiftadj-err');
+  const btn = qs('#shiftadj-submit');
+
+  if (!shiftId || !requestedStart || !requestedEnd || !reason || !coverArranged) {
+    if (errEl) errEl.style.display = 'block';
+    return;
+  }
+  if (requestedEnd <= requestedStart) {
+    if (errEl) { errEl.textContent = '⚠ New end time must be after the new start time.'; errEl.style.display = 'block'; }
+    return;
+  }
+
+  if (errEl) errEl.style.display = 'none';
+  if (btn) { btn.disabled = true; btn.textContent = 'Submitting…'; }
+
+  const row = {
+    id: 'shiftadj' + Date.now(),
+    emp_id: state.emp.id,
+    shift_id: shiftId,
+    date,
+    original_start: originalStart,
+    original_end: originalEnd,
+    requested_start: requestedStart,
+    requested_end: requestedEnd,
+    reason,
+    cover_arranged: coverArranged,
+    cover_notes: coverNotes || null,
+    status: 'pending',
+    denial_reason: null,
+    decided_at: null,
+    created_at: new Date().toISOString()
+  };
+
+  try {
+    const { error } = await supabase
+      .from('shift_adjustment_requests')
+      .insert([row]);
+
+    if (error) throw error;
+
+    gasPost({
+      action: 'sendEmail',
+      fn: 'sendShiftAdjustmentRequestNotification',
+      payload: {
+        empId: state.emp.id,
+        empName: `${state.emp.first || ''} ${state.emp.last || ''}`.trim(),
+        empFirst: state.emp.first || '',
+        empLast: state.emp.last || '',
+        empEmail: state.emp.email || '',
+        empRole: state.emp.role || '',
+        date,
+        originalStart, originalEnd,
+        requestedStart, requestedEnd,
+        reason,
+        coverArranged,
+        coverNotes,
+        source: 'Staff Portal'
+      }
+    }).catch(err => console.warn('Shift adjustment email failed:', err));
+
+    const fresh = await getAllData();
+    state.allData = fresh.data || {};
+
+    if (qs('#shiftadj-form')) qs('#shiftadj-form').innerHTML = '';
+    renderOT();
+
+    toast('Time change request submitted! Your manager has been notified. ✓', 'success', 5000);
+
+  } catch (e) {
+    console.error('Shift adjustment submit failed:', e);
+    if (btn) { btn.disabled = false; btn.textContent = 'Submit'; }
+    toast('Could not submit request: ' + e.message, 'error', 5000);
   }
 };
 

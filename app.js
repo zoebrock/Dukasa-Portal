@@ -345,6 +345,7 @@ async function getAllData() {
     staffRead: o.staff_read,
     availConfirmed: o.avail_confirmed,
     staffConfirmed: o.staff_confirmed,
+    denialReason: o.denial_reason || '',
     staffDenialReason: o.staff_denial_reason,
     task: o.task || ''
   }));
@@ -3417,7 +3418,7 @@ window.submitMC = async function() {
 // ── OT ─────────────────────────────────────────────────────────
 function otBadgeHTML_(o) {
   if (o.approved === true) return `<span class="badge badge-green">Approved</span>`;
-  if (o.approved === false) return `<span class="badge badge-red">Denied</span>`;
+  if (o.approved === false) return `<span class="badge badge-red">${o.staffConfirmed === false ? 'Declined by you' : 'Denied by manager'}</span>`;
 
   if (
     o.requestedBy === 'manager' &&
@@ -3443,7 +3444,8 @@ function otRequestCardHTML_(o) {
         <div class="list-title">${esc(FDS(o.date))} · ${esc(o.start || '')} – ${esc(o.end || '')}</div>
         ${o.reason ? `<div class="list-copy">${esc(o.reason)}</div>` : ''}
         ${o.task ? `<div class="list-copy">Task: ${esc(o.task)}</div>` : ''}
-        ${o.staffDenialReason ? `<div class="list-copy" style="color:#A32D2D">Declined reason: ${esc(o.staffDenialReason)}</div>` : ''}
+        ${o.staffDenialReason ? `<div class="list-copy" style="color:#A32D2D">Your decline reason: ${esc(o.staffDenialReason)}</div>` : ''}
+        ${(o.approved === false && o.staffConfirmed !== false && o.denialReason) ? `<div class="list-copy" style="color:#A32D2D">Manager's reason: ${esc(o.denialReason)}</div>` : ''}
       </div>
 
       <div style="display:flex;flex-direction:column;gap:7px;align-items:flex-end">
